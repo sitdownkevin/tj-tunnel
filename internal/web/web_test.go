@@ -14,6 +14,7 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/sitdownkevin/tj-tunnel/internal/logbus"
 	"github.com/sitdownkevin/tj-tunnel/internal/status"
 )
 
@@ -208,9 +209,9 @@ func TestWebSocketPushesSnapshots(t *testing.T) {
 	}
 	defer conn.CloseNow()
 
-	_, data, err := conn.Read(ctx)
-	if err != nil {
-		t.Fatalf("read: %v", err)
+	kind, data := readFrame(t, ctx, conn)
+	if kind != "status" {
+		t.Fatalf("frame type = %q, want status", kind)
 	}
 	var got status.Snapshot
 	if err := json.Unmarshal(data, &got); err != nil {
@@ -223,9 +224,9 @@ func TestWebSocketPushesSnapshots(t *testing.T) {
 	// A state change must reach the same connection.
 	st.SetPhase(status.PhaseReconnecting)
 	for i := 0; i < 5; i++ {
-		_, data, err = conn.Read(ctx)
-		if err != nil {
-			t.Fatalf("read: %v", err)
+		kind, data = readFrame(t, ctx, conn)
+		if kind != "status" {
+			continue
 		}
 		if err := json.Unmarshal(data, &got); err != nil {
 			t.Fatalf("decode: %v", err)
@@ -235,6 +236,98 @@ func TestWebSocketPushesSnapshots(t *testing.T) {
 		}
 	}
 	t.Fatal("state change never arrived")
+}
+
+// readFrame reads one multiplexed frame from the socket.
+func readFrame(t *testing.T, ctx context.Context, conn *websocket.Conn) (string, json.RawMessage) {
+	t.Helper()
+	_, data, err := conn.Read(ctx)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	var frame struct {
+		Type string          `json:"type"`
+		Data json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(data, &frame); err != nil {
+		t.Fatalf("decode frame: %v", err)
+	}
+	return frame.Type, frame.Data
+}
+
+func TestWebSocketStreamsLogs(t *testing.T) {
+	bus := logbus.New(50)
+	bus.Add(logbus.Entry{Time: time.Now(), Level: "INFO", Message: "history line"})
+
+	srv, _ := newTestServer(t, Options{Username: "admin", Password: "secret", Logs: bus})
+	c := client(t)
+	doLogin(t, c, srv.URL, "admin", "secret")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(srv.URL, "http")+"/api/ws", &websocket.DialOptions{HTTPClient: c})
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.CloseNow()
+
+	// The buffered history is replayed first.
+	kind, data := readFrame(t, ctx, conn)
+	if kind != "logs" {
+		t.Fatalf("first frame type = %q, want logs", kind)
+	}
+	var history []logbus.Entry
+	if err := json.Unmarshal(data, &history); err != nil {
+		t.Fatalf("decode history: %v", err)
+	}
+	if len(history) != 1 || history[0].Message != "history line" {
+		t.Fatalf("history = %+v", history)
+	}
+
+	// Live records arrive without waiting for a status tick.
+	bus.Add(logbus.Entry{Time: time.Now(), Level: "WARN", Message: "live line"})
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		kind, data = readFrame(t, ctx, conn)
+		if kind != "log" {
+			continue
+		}
+		var entry logbus.Entry
+		if err := json.Unmarshal(data, &entry); err != nil {
+			t.Fatalf("decode entry: %v", err)
+		}
+		if entry.Message == "live line" && entry.Level == "WARN" {
+			return
+		}
+	}
+	t.Fatal("live log entry never arrived")
+}
+
+func TestLogHistoryEndpoint(t *testing.T) {
+	bus := logbus.New(50)
+	for _, msg := range []string{"one", "two", "three"} {
+		bus.Add(logbus.Entry{Time: time.Now(), Level: "INFO", Message: msg})
+	}
+	srv, _ := newTestServer(t, Options{Username: "admin", Password: "secret", Logs: bus})
+	c := client(t)
+
+	if res, err := c.Get(srv.URL + "/api/logs"); err != nil || res.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated /api/logs: %v / %v", err, res)
+	}
+
+	doLogin(t, c, srv.URL, "admin", "secret")
+	res, err := c.Get(srv.URL + "/api/logs?limit=2")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer res.Body.Close()
+	var entries []logbus.Entry
+	if err := json.NewDecoder(res.Body).Decode(&entries); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(entries) != 2 || entries[0].Message != "two" || entries[1].Message != "three" {
+		t.Fatalf("entries = %+v", entries)
+	}
 }
 
 func TestWebSocketRequiresSession(t *testing.T) {

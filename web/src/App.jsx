@@ -5,6 +5,8 @@ import {
   Button,
   ButtonGroup,
   FormControlLabel,
+  MenuItem,
+  Select,
   Switch,
   Card,
   CardContent,
@@ -23,6 +25,7 @@ import { alpha } from "@mui/material/styles";
 import ContentCopyRoundedIcon from "@mui/icons-material/ContentCopyRounded";
 import PlayArrowRoundedIcon from "@mui/icons-material/PlayArrowRounded";
 import StopRoundedIcon from "@mui/icons-material/StopRounded";
+import TerminalRoundedIcon from "@mui/icons-material/TerminalRounded";
 import LogoutRoundedIcon from "@mui/icons-material/LogoutRounded";
 import ShieldRoundedIcon from "@mui/icons-material/ShieldRounded";
 import ArrowUpwardRoundedIcon from "@mui/icons-material/ArrowUpwardRounded";
@@ -165,10 +168,13 @@ function LoginPage({ onSuccess }) {
 function Dashboard({ onSignOut }) {
   const [snapshot, setSnapshot] = useState(null);
   const [link, setLink] = useState("open");
+  const [logs, setLogs] = useState([]);
 
   useEffect(() => {
     const socket = new StatusSocket({
       onSnapshot: setSnapshot,
+      onLogs: (history) => setLogs(history.slice(-MAX_LOGS)),
+      onLog: (entry) => setLogs((prev) => [...prev, entry].slice(-MAX_LOGS)),
       onState: (state) => {
         setLink(state);
         if (state === "unauthorized") onSignOut();
@@ -241,6 +247,8 @@ function Dashboard({ onSignOut }) {
 
         <ConnectionCard snapshot={snapshot} />
 
+        <LogPanel logs={logs} link={link} onClear={() => setLogs([])} />
+
         <Card>
           <CardContent>
             <Typography variant="subtitle2" color="text.secondary" gutterBottom>
@@ -270,6 +278,147 @@ function Dashboard({ onSignOut }) {
       </Stack>
     </Container>
   );
+}
+
+const MAX_LOGS = 500;
+
+const LEVEL_COLOR = {
+  ERROR: "error.main",
+  WARN: "warning.main",
+  INFO: "text.secondary",
+  DEBUG: "text.disabled",
+};
+
+// LogPanel shows the live log stream pushed over the same WebSocket.
+function LogPanel({ logs, link, onClear }) {
+  const [minLevel, setMinLevel] = useState("INFO");
+  const [autoScroll, setAutoScroll] = useState(true);
+  const [paused, setPaused] = useState(false);
+  const [frozen, setFrozen] = useState([]);
+  const boxRef = React.useRef(null);
+
+  const visible = useMemo(() => {
+    const order = ["DEBUG", "INFO", "WARN", "ERROR"];
+    const min = order.indexOf(minLevel);
+    return logs.filter((entry) => order.indexOf(entry.level) >= min);
+  }, [logs, minLevel]);
+
+  const rows = paused ? frozen : visible;
+
+  useEffect(() => {
+    if (!autoScroll || paused) return;
+    const box = boxRef.current;
+    if (box) box.scrollTop = box.scrollHeight;
+  }, [rows, autoScroll, paused]);
+
+  const togglePause = () => {
+    if (!paused) setFrozen(visible);
+    setPaused(!paused);
+  };
+
+  return (
+    <Card>
+      <CardContent>
+        <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }} flexWrap="wrap">
+          <TerminalRoundedIcon sx={{ fontSize: 18, color: "text.secondary" }} />
+          <Typography variant="subtitle2" color="text.secondary">
+            实时日志
+          </Typography>
+          <Chip
+            size="small"
+            variant="outlined"
+            label={`${rows.length} 条`}
+            sx={{ height: 20, fontSize: 11 }}
+          />
+          <Box sx={{ flex: 1 }} />
+
+          <Select
+            size="small"
+            value={minLevel}
+            onChange={(event) => setMinLevel(event.target.value)}
+            sx={{ height: 30, fontSize: 12, minWidth: 92 }}
+          >
+            <MenuItem value="DEBUG">全部</MenuItem>
+            <MenuItem value="INFO">INFO 以上</MenuItem>
+            <MenuItem value="WARN">WARN 以上</MenuItem>
+            <MenuItem value="ERROR">仅错误</MenuItem>
+          </Select>
+
+          <FormControlLabel
+            sx={{ ml: 0, mr: 0 }}
+            control={
+              <Switch
+                size="small"
+                checked={autoScroll}
+                onChange={(event) => setAutoScroll(event.target.checked)}
+              />
+            }
+            label={<Typography variant="caption">自动滚动</Typography>}
+          />
+          <Button size="small" variant={paused ? "contained" : "text"} onClick={togglePause}>
+            {paused ? "继续" : "暂停"}
+          </Button>
+          <Button size="small" onClick={onClear}>
+            清空
+          </Button>
+        </Stack>
+
+        <Box
+          ref={boxRef}
+          sx={{
+            height: 260,
+            overflow: "auto",
+            p: 1.25,
+            borderRadius: 2,
+            border: 1,
+            borderColor: "divider",
+            bgcolor: "background.default",
+            fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+            fontSize: 12,
+            lineHeight: 1.65,
+          }}
+        >
+          {rows.length === 0 ? (
+            <Typography variant="caption" color="text.disabled">
+              {link === "open" ? "暂无日志" : "等待连接…"}
+            </Typography>
+          ) : (
+            rows.map((entry, index) => (
+              <Box key={`${entry.time}-${index}`} sx={{ display: "flex", gap: 1, minWidth: 0 }}>
+                <Box component="span" sx={{ color: "text.disabled", flexShrink: 0 }}>
+                  {formatClock(entry.time)}
+                </Box>
+                <Box
+                  component="span"
+                  sx={{ color: LEVEL_COLOR[entry.level] || "text.secondary", width: 44, flexShrink: 0 }}
+                >
+                  {entry.level}
+                </Box>
+                <Box component="span" sx={{ wordBreak: "break-word" }}>
+                  {entry.message}
+                  {entry.attrs?.length ? (
+                    <Box component="span" sx={{ color: "text.disabled" }}>
+                      {"  " + entry.attrs.join("  ")}
+                    </Box>
+                  ) : null}
+                </Box>
+              </Box>
+            ))
+          )}
+        </Box>
+
+        <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>
+          日志通过 WebSocket 实时推送，最多保留 500 条；与容器 stdout 内容一致。
+        </Typography>
+      </CardContent>
+    </Card>
+  );
+}
+
+function formatClock(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "--:--:--";
+  return date.toLocaleTimeString("zh-CN", { hour12: false });
 }
 
 // ControlBar exposes start/stop and the auto-reconnect switch.

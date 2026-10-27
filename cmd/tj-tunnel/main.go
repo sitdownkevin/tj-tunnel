@@ -18,6 +18,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/sitdownkevin/tj-tunnel/internal/config"
+	"github.com/sitdownkevin/tj-tunnel/internal/logbus"
 	"github.com/sitdownkevin/tj-tunnel/internal/netstack"
 	"github.com/sitdownkevin/tj-tunnel/internal/protocol"
 	"github.com/sitdownkevin/tj-tunnel/internal/resolver"
@@ -107,7 +108,8 @@ func run() error {
 		return err
 	}
 
-	logger := newLogger(cfg.LogLevel)
+	bus := logbus.New(500)
+	logger := newLogger(cfg.LogLevel, bus)
 	slog.SetDefault(logger)
 	logger.Info("starting", "version", version.Version, "config", cfg.Describe())
 
@@ -149,6 +151,7 @@ func run() error {
 			Log:        logger,
 			State:      state,
 			Controller: ctrl,
+			Logs:       bus,
 		})
 		defer dash.Shutdown()
 		go func() {
@@ -276,12 +279,17 @@ func usableDNS(hosts []string) []netip.Addr {
 	return out
 }
 
-func newLogger(level string) *slog.Logger {
+// newLogger writes to stderr and mirrors every record into the dashboard bus.
+func newLogger(level string, bus *logbus.Bus) *slog.Logger {
 	var l slog.Level
 	if err := l.UnmarshalText([]byte(level)); err != nil {
 		l = slog.LevelInfo
 	}
-	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: l}))
+	handler := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: l})
+	if bus == nil {
+		return slog.New(handler)
+	}
+	return slog.New(logbus.NewHandler(handler, bus))
 }
 
 // promptCredentials asks for missing credentials when stdin is a terminal.

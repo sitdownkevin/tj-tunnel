@@ -28,9 +28,12 @@ export async function session() {
 }
 
 // StatusSocket keeps one connection alive, reconnecting with a short backoff.
+// The server multiplexes frames: {type:"status"|"log"|"logs", data:...}.
 export class StatusSocket {
-  constructor({ onSnapshot, onState }) {
+  constructor({ onSnapshot, onState, onLog, onLogs }) {
     this.onSnapshot = onSnapshot;
+    this.onLog = onLog;
+    this.onLogs = onLogs;
     this.onState = onState; // "open" | "closed" | "connecting" | "unauthorized"
     this.socket = null;
     this.attempt = 0;
@@ -50,10 +53,28 @@ export class StatusSocket {
       this.onState?.("open");
     };
     socket.onmessage = (event) => {
+      let frame;
       try {
-        this.onSnapshot(JSON.parse(event.data));
+        frame = JSON.parse(event.data);
       } catch {
-        /* ignore malformed frames */
+        return; // ignore malformed frames
+      }
+      if (!frame || typeof frame.type !== "string") {
+        this.onSnapshot?.(frame); // tolerate a bare snapshot
+        return;
+      }
+      switch (frame.type) {
+        case "status":
+          this.onSnapshot?.(frame.data);
+          break;
+        case "log":
+          this.onLog?.(frame.data);
+          break;
+        case "logs":
+          this.onLogs?.(frame.data || []);
+          break;
+        default:
+          break;
       }
     };
     socket.onclose = (event) => {

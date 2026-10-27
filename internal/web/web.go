@@ -24,6 +24,7 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/sitdownkevin/tj-tunnel/internal/logbus"
 	"github.com/sitdownkevin/tj-tunnel/internal/status"
 )
 
@@ -54,7 +55,8 @@ type Options struct {
 	Password   string
 	Log        *slog.Logger
 	State      *status.State
-	Controller Controller // nil disables the control endpoints
+	Controller Controller  // nil disables the control endpoints
+	Logs       *logbus.Bus // nil disables live logs
 }
 
 // Server is the dashboard HTTP server.
@@ -81,6 +83,7 @@ func New(opts Options) *Server {
 	mux.HandleFunc("POST /api/logout", s.handleLogout)
 	mux.HandleFunc("GET /api/session", s.handleSession)
 	mux.HandleFunc("GET /api/ws", s.handleWS)
+	mux.HandleFunc("GET /api/logs", s.handleLogHistory)
 	mux.HandleFunc("GET /api/tunnel", s.handleTunnelState)
 	mux.HandleFunc("PUT /api/tunnel", s.handleTunnelControl)
 	mux.HandleFunc("GET /api/status", s.handleStatus) // plain snapshot, handy for scripts
@@ -255,6 +258,24 @@ func (s *Server) handleTunnelControl(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) handleLogHistory(w http.ResponseWriter, r *http.Request) {
+	if !s.authorized(r) {
+		writeError(w, http.StatusUnauthorized, "未登录")
+		return
+	}
+	if s.opts.Logs == nil {
+		writeJSON(w, http.StatusOK, []logbus.Entry{})
+		return
+	}
+	history := s.opts.Logs.History()
+	if limit := r.URL.Query().Get("limit"); limit != "" {
+		if n, err := strconv.Atoi(limit); err == nil && n > 0 && n < len(history) {
+			history = history[len(history)-n:]
+		}
+	}
+	writeJSON(w, http.StatusOK, history)
+}
+
 func (s *Server) validCredentials(user, pass string) bool {
 	return subtle.ConstantTimeCompare([]byte(user), []byte(s.opts.Username)) == 1 &&
 		subtle.ConstantTimeCompare([]byte(pass), []byte(s.opts.Password)) == 1
@@ -324,27 +345,87 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.CloseNow()
 
-	ctx := r.Context()
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+
+	// One writer goroutine: the websocket library does not support concurrent
+	// writes, and both the status ticker and the log stream feed this socket.
+	frames := make(chan []byte, 256)
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case frame := <-frames:
+				writeCtx, cancel := context.WithTimeout(ctx, writeWait)
+				err := conn.Write(writeCtx, websocket.MessageText, frame)
+				cancel()
+				if err != nil {
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+
+	// Replay the recent log history so a fresh page is not empty.
+	if s.opts.Logs != nil {
+		if history := s.opts.Logs.History(); len(history) > 0 {
+			if frame, err := envelope("logs", history); err == nil {
+				select {
+				case frames <- frame:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}
+		entries, unsubscribe := s.opts.Logs.Subscribe()
+		defer unsubscribe()
+		go func() {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case entry, ok := <-entries:
+					if !ok {
+						return
+					}
+					frame, err := envelope("log", entry)
+					if err != nil {
+						continue
+					}
+					select {
+					case frames <- frame:
+					case <-ctx.Done():
+						return
+					}
+				}
+			}
+		}()
+	}
+
+	ticker := time.NewTicker(pushInterval)
+	defer ticker.Stop()
 	for {
-		if err := s.pushOnce(ctx, conn); err != nil {
-			return
+		frame, err := envelope("status", s.opts.State.Snapshot())
+		if err == nil {
+			select {
+			case frames <- frame:
+			case <-ctx.Done():
+				return
+			}
 		}
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(pushInterval):
+		case <-ticker.C:
 		}
 	}
 }
 
-func (s *Server) pushOnce(ctx context.Context, conn *websocket.Conn) error {
-	payload, err := json.Marshal(s.opts.State.Snapshot())
-	if err != nil {
-		return err
-	}
-	writeCtx, cancel := context.WithTimeout(ctx, writeWait)
-	defer cancel()
-	return conn.Write(writeCtx, websocket.MessageText, payload)
+// envelope wraps a payload so one socket can carry several message kinds.
+func envelope(kind string, payload any) ([]byte, error) {
+	return json.Marshal(map[string]any{"type": kind, "data": payload})
 }
 
 func sameOrigin(origin, host string) bool {

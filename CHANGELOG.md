@@ -27,6 +27,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Live logs in the dashboard: a bounded in-memory ring (500 entries) fed by a
+  `slog` handler that mirrors everything written to stderr, streamed over the
+  same WebSocket and also available via `GET /api/logs`. The panel supports
+  level filtering, auto-scroll, pause and clear.
 - Tunnel control from the dashboard: start/stop buttons and an auto-reconnect
   switch (`PUT /api/tunnel`, `GET /api/tunnel`).
 - `AUTOSTART` setting. It defaults to `false`, so a fresh container waits for a
