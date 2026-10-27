@@ -1,8 +1,8 @@
 # tjsocks
 
-[![CI](https://github.com/your-github-user/tjsocks/actions/workflows/ci.yml/badge.svg)](https://github.com/your-github-user/tjsocks/actions/workflows/ci.yml)
-[![Docker](https://github.com/your-github-user/tjsocks/actions/workflows/docker.yml/badge.svg)](https://github.com/your-github-user/tjsocks/actions/workflows/docker.yml)
-[![Image size](https://img.shields.io/docker/image-size/your-dockerhub-user/tjsocks?label=image)](https://hub.docker.com/r/your-dockerhub-user/tjsocks)
+[![CI](https://github.com/sitdownkevin/tjsocks/actions/workflows/ci.yml/badge.svg)](https://github.com/sitdownkevin/tjsocks/actions/workflows/ci.yml)
+[![Docker](https://github.com/sitdownkevin/tjsocks/actions/workflows/docker.yml/badge.svg)](https://github.com/sitdownkevin/tjsocks/actions/workflows/docker.yml)
+[![Image size](https://img.shields.io/docker/image-size/sitdownkevin/tjsocks?label=image)](https://hub.docker.com/r/sitdownkevin/tjsocks)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 把同济校园网 VPN 变成一台 **SOCKS5 代理服务器**，同时支持 **TCP 与 UDP**。
@@ -33,8 +33,8 @@
 mkdir -p ~/tjsocks && cd ~/tjsocks
 
 # 只下载两个文件
-curl -fsSLO https://raw.githubusercontent.com/your-github-user/tjsocks/main/docker-compose.yml
-curl -fsSLO https://raw.githubusercontent.com/your-github-user/tjsocks/main/.env.example
+curl -fsSLO https://raw.githubusercontent.com/sitdownkevin/tjsocks/main/docker-compose.yml
+curl -fsSLO https://raw.githubusercontent.com/sitdownkevin/tjsocks/main/.env.example
 mv .env.example .env
 
 vi .env      # 填 TJ_USER / TJ_PASSWORD / SOCKS_USER / SOCKS_PASS
@@ -46,7 +46,7 @@ docker compose logs -f      # 看到 "SOCKS5 ready" 即成功
 `.env` 最少要填四项：
 
 ```ini
-TJSOCKS_IMAGE=docker.io/your-dockerhub-user/tjsocks:latest
+TJSOCKS_IMAGE=docker.io/sitdownkevin/tjsocks:latest
 TJ_USER=你的学号
 TJ_PASSWORD=你的密码
 SOCKS_USER=proxyuser

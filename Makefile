@@ -3,7 +3,7 @@
 # The module path is a placeholder: run `make rename` once after cloning into
 # your own GitHub account so imports match the repository URL.
 
-MODULE   ?= github.com/your-github-user/tjsocks
+MODULE   ?= github.com/sitdownkevin/tjsocks
 BIN      ?= bin/tjsocks
 IMAGE    ?= tjsocks
 VERSION  ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
@@ -66,7 +66,7 @@ vendor: ## Refresh the vendor directory
 rename: ## Rewrite the module path (usage: make rename MODULE=github.com/you/tjsocks)
 	@test -n "$(MODULE)" || { echo "MODULE is required"; exit 1; }
 	@echo "Renaming module to $(MODULE)"
-	@sed -i.bak "s|github.com/your-github-user/tjsocks|$(MODULE)|g" go.mod $$(find cmd internal -name '*.go') Dockerfile Makefile
+	@sed -i.bak "s|github.com/sitdownkevin/tjsocks|$(MODULE)|g" go.mod $$(find cmd internal -name '*.go') Dockerfile Makefile
 	@find . -name '*.bak' -delete
 	@go build -mod=vendor ./... && echo "OK"
 

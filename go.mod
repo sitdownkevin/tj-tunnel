@@ -1,4 +1,4 @@
-module github.com/your-github-user/tjsocks
+module github.com/sitdownkevin/tjsocks
 
 go 1.27.3
 

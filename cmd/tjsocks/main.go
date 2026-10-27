@@ -17,13 +17,13 @@ import (
 
 	"golang.org/x/term"
 
-	"github.com/your-github-user/tjsocks/internal/config"
-	"github.com/your-github-user/tjsocks/internal/netstack"
-	"github.com/your-github-user/tjsocks/internal/protocol"
-	"github.com/your-github-user/tjsocks/internal/resolver"
-	"github.com/your-github-user/tjsocks/internal/socks"
-	"github.com/your-github-user/tjsocks/internal/tunnel"
-	"github.com/your-github-user/tjsocks/internal/version"
+	"github.com/sitdownkevin/tjsocks/internal/config"
+	"github.com/sitdownkevin/tjsocks/internal/netstack"
+	"github.com/sitdownkevin/tjsocks/internal/protocol"
+	"github.com/sitdownkevin/tjsocks/internal/resolver"
+	"github.com/sitdownkevin/tjsocks/internal/socks"
+	"github.com/sitdownkevin/tjsocks/internal/tunnel"
+	"github.com/sitdownkevin/tjsocks/internal/version"
 )
 
 const (

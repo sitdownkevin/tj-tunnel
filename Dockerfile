@@ -22,9 +22,9 @@ ARG TARGETARCH
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} \
       go build -mod=vendor -trimpath \
       -ldflags "-s -w \
-        -X github.com/your-github-user/tjsocks/internal/version.Version=${VERSION} \
-        -X github.com/your-github-user/tjsocks/internal/version.Commit=${COMMIT} \
-        -X github.com/your-github-user/tjsocks/internal/version.Date=${DATE}" \
+        -X github.com/sitdownkevin/tjsocks/internal/version.Version=${VERSION} \
+        -X github.com/sitdownkevin/tjsocks/internal/version.Commit=${COMMIT} \
+        -X github.com/sitdownkevin/tjsocks/internal/version.Date=${DATE}" \
       -o /out/tjsocks ./cmd/tjsocks
 
 # ---- runtime stage --------------------------------------------------------
@@ -38,7 +38,7 @@ LABEL org.opencontainers.image.title="tjsocks" \
       org.opencontainers.image.description="Tongji campus VPN to SOCKS5 gateway (TCP + UDP)" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.licenses="MIT" \
-      org.opencontainers.image.source="https://github.com/your-github-user/tjsocks"
+      org.opencontainers.image.source="https://github.com/sitdownkevin/tjsocks"
 
 COPY --from=build /out/tjsocks /usr/local/bin/tjsocks
 

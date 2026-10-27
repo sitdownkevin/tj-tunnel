@@ -2,7 +2,7 @@ services:
   tjsocks:
     # Published by the GitHub Actions workflow. Replace OWNER with your
     # Docker Hub account (or point at ghcr.io/OWNER/tjsocks).
-    image: ${TJSOCKS_IMAGE:-docker.io/your-dockerhub-user/tjsocks:latest}
+    image: ${TJSOCKS_IMAGE:-docker.io/sitdownkevin/tjsocks:latest}
     container_name: tjsocks
     restart: unless-stopped
 
