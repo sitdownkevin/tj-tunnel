@@ -2,7 +2,6 @@
 
 [![CI](https://github.com/sitdownkevin/tjsocks/actions/workflows/ci.yml/badge.svg)](https://github.com/sitdownkevin/tjsocks/actions/workflows/ci.yml)
 [![Docker](https://github.com/sitdownkevin/tjsocks/actions/workflows/docker.yml/badge.svg)](https://github.com/sitdownkevin/tjsocks/actions/workflows/docker.yml)
-[![Image size](https://img.shields.io/docker/image-size/sitdownkevin/tjsocks?label=image)](https://hub.docker.com/r/sitdownkevin/tjsocks)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 把同济校园网 VPN 变成一台 **SOCKS5 代理服务器**，同时支持 **TCP 与 UDP**。
@@ -24,6 +23,7 @@
 - **DNS over tunnel**：域名走校内 DNS 解析，内网域名也能正确解析，并带 TTL 缓存
 - **容器安全**：distroless + 非 root + 只读根文件系统 + 无 capability
 - **多架构镜像**：`linux/amd64`、`linux/arm64`（树莓派 / ARM VPS 可用）
+- **零配置发布**：GitHub Actions 自动构建并推送到 GHCR，服务器一条命令拉取
 
 ## 快速开始
 
@@ -31,27 +31,29 @@
 
 ```sh
 mkdir -p ~/tjsocks && cd ~/tjsocks
-
-# 只下载两个文件
 curl -fsSLO https://raw.githubusercontent.com/sitdownkevin/tjsocks/main/docker-compose.yml
-curl -fsSLO https://raw.githubusercontent.com/sitdownkevin/tjsocks/main/.env.example
-mv .env.example .env
 
-vi .env      # 填 TJ_USER / TJ_PASSWORD / SOCKS_USER / SOCKS_PASS
+vi docker-compose.yml       # 填 TJ_USER / TJ_PASSWORD / SOCKS_USER / SOCKS_PASS
 
 docker compose up -d
 docker compose logs -f      # 看到 "SOCKS5 ready" 即成功
 ```
 
-`.env` 最少要填四项：
+只需要一个文件，所有配置都写在 `docker-compose.yml` 里（不用 `.env`）。最少要改这四处：
 
-```ini
-TJSOCKS_IMAGE=docker.io/sitdownkevin/tjsocks:latest
-TJ_USER=你的学号
-TJ_PASSWORD=你的密码
-SOCKS_USER=proxyuser
-SOCKS_PASS=换一个强密码
+```yaml
+environment:
+  TJ_USER: "你的学号"
+  TJ_PASSWORD: "你的密码"
+  SOCKS_USER: "proxyuser"
+  SOCKS_PASS: "换一个强密码"
 ```
+
+镜像来自 GitHub Container Registry：`ghcr.io/sitdownkevin/tjsocks:latest`
+（公开包，拉取无需登录）。
+
+> 想锁定版本就改成 `ghcr.io/sitdownkevin/tjsocks:0.1.0`。
+> 升级：`docker compose pull && docker compose up -d`。
 
 ### 2. 其他设备上使用
 
@@ -61,7 +63,7 @@ SOCKS_PASS=换一个强密码
 | --- | --- |
 | 服务器 | 你的服务器 IP |
 | 端口 | `1080` |
-| 用户名 / 密码 | `.env` 里的 `SOCKS_USER` / `SOCKS_PASS` |
+| 用户名 / 密码 | compose 里的 `SOCKS_USER` / `SOCKS_PASS` |
 | UDP | 打开 |
 
 命令行验证：
@@ -77,13 +79,14 @@ curl -x socks5h://proxyuser:密码@服务器IP:1080 https://api.ip.sb/ip
 
 ## 配置
 
-### 环境变量
+### docker-compose.yml 配置项
 
-| 变量 | 说明 | 默认 |
+全部写在 `docker-compose.yml` 的 `environment:` 里，改完 `docker compose up -d` 生效。
+
+| 配置项 | 说明 | 默认 |
 | --- | --- | --- |
 | `TJ_USER` / `TJ_PASSWORD` | 校园 VPN 账号密码（**必填**） | — |
 | `SOCKS_USER` / `SOCKS_PASS` | 代理认证（公网部署务必设置） | 无认证 |
-| `SOCKS_PORT` | compose 映射到宿主机的端口 | `1080` |
 | `SOCKS_LISTEN` | 容器内 TCP 监听地址 | `0.0.0.0:1080` |
 | `SOCKS_UDP_LISTEN` | 容器内 UDP 中继监听地址 | 同 TCP 端口 |
 | `SOCKS_UDP_ADVERTISE` | 返回给客户端的 UDP 中继地址 | `0.0.0.0:<端口>` |
@@ -91,6 +94,16 @@ curl -x socks5h://proxyuser:密码@服务器IP:1080 https://api.ip.sb/ip
 | `TJ_GATEWAY_ADDRESS` | 网关 `IP:端口`，DNS 解析不了时直连 | 空 |
 | `TJ_AUTH_METHOD` | 认证方式 | `LDAP3` |
 | `TJ_LOG_LEVEL` | `debug` / `info` / `warn` / `error` | `info` |
+
+### 改宿主机端口
+
+只改 `ports:` 左边：
+
+```yaml
+ports:
+  - "7891:1080/tcp"
+  - "7891:1080/udp"
+```
 
 ### 关于 UDP 通告地址
 
@@ -181,15 +194,11 @@ make rename MODULE=github.com/你的用户名/tjsocks
 - 打 `v*.*.*` 标签：额外推送语义化版本标签
 - Pull Request：只构建 `linux/amd64` 验证，不推送
 
-镜像推送到 Docker Hub 需要两个仓库 Secret：
+镜像推送到 GitHub Container Registry（`ghcr.io/<owner>/<repo>`），使用仓库自带的
+`GITHUB_TOKEN`，**不需要配置任何 Secret**。
 
-| Secret | 说明 |
-| --- | --- |
-| `DOCKERHUB_USERNAME` | Docker Hub 用户名 |
-| `DOCKERHUB_TOKEN` | Docker Hub Access Token（`Read & Write`） |
-
-没有配置 Secret 时，工作流会自动改推 GitHub Container Registry
-（`ghcr.io/<owner>/tjsocks`），无需任何配置即可用。
+首次推送后到仓库 **Packages** 页面把包的可见性设为 `Public`，其他人（包括你的
+服务器）就能免登录拉取；私有仓库则需要在服务器上 `docker login ghcr.io`。
 
 ## 故障排查
 
@@ -197,7 +206,7 @@ make rename MODULE=github.com/你的用户名/tjsocks
 | --- | --- |
 | 日志 `authentication failed` | 账号或密码错；确认认证方式是 `LDAP3`（`TJ_AUTH_METHOD`） |
 | 日志 `gateway terminated the session (reason 1)` | 同一账号在别处登录了，顶掉了本会话。**一个账号同时只能有一个会话** |
-| 一直 `reconnecting` / `no such host` | 服务器 DNS 解析不了 `vpn.tongji.cn`，在 `.env` 设 `TJ_GATEWAY_ADDRESS=202.120.189.34:443` |
+| 一直 `reconnecting` / `no such host` | 服务器 DNS 解析不了 `vpn.tongji.cn`，在 compose 里取消注释并设置 `TJ_GATEWAY_ADDRESS: "202.120.189.34:443"` |
 | TCP 正常、UDP 不通 | 确认 compose 里 `1080/udp` 也映射了；必要时设 `SOCKS_UDP_ADVERTISE` |
 | 容器 `unhealthy` | `docker logs` 查看是否还在重连；健康检查 30 s 一次 |
 | 校内域名解析到公网地址 | 客户端要用 `socks5h`（域名交给代理解析） |
@@ -205,7 +214,8 @@ make rename MODULE=github.com/你的用户名/tjsocks
 ## 安全
 
 - 公网部署**必须**设置 `SOCKS_USER` / `SOCKS_PASS`，否则等于开放代理。
-- 账号密码通过环境变量传入，不会写进镜像；`.env` 已在 `.gitignore` 中。
+- 账号密码只存在于 `docker-compose.yml` 的 `environment:` 里，不会写进镜像。
+  真实凭证不要提交到公开仓库（本仓库的 compose 文件只有占位符）。
 - 容器以非 root 运行，根文件系统只读，丢弃全部 capability。
 - 详见 [SECURITY.md](SECURITY.md)。
 

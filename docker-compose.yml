@@ -1,38 +1,53 @@
 services:
   tjsocks:
-    # Published by the GitHub Actions workflow. Replace OWNER with your
-    # Docker Hub account (or point at ghcr.io/OWNER/tjsocks).
-    image: ${TJSOCKS_IMAGE:-docker.io/sitdownkevin/tjsocks:latest}
+    # Image published by the GitHub Actions workflow to the GitHub Container
+    # Registry. No login is needed to pull a public package.
+    image: ghcr.io/sitdownkevin/tjsocks:latest
     container_name: tjsocks
     restart: unless-stopped
 
-    # Values are read from ./.env (Compose loads it automatically for
-    # interpolation). Copy .env.example to .env and fill it in.
+    # ---------------------------------------------------------------------
+    # 配置：直接改这里，不需要 .env
+    # ---------------------------------------------------------------------
     environment:
-      TJ_USER: ${TJ_USER:?set TJ_USER in .env}
-      TJ_PASSWORD: ${TJ_PASSWORD:?set TJ_PASSWORD in .env}
-      TJ_AUTH_METHOD: ${TJ_AUTH_METHOD:-}
-      TJ_GATEWAY: ${TJ_GATEWAY:-vpn.tongji.cn}
-      TJ_GATEWAY_ADDRESS: ${TJ_GATEWAY_ADDRESS:-}
-      TJ_LOG_LEVEL: ${TJ_LOG_LEVEL:-info}
-      SOCKS_LISTEN: ${SOCKS_LISTEN:-0.0.0.0:1080}
-      SOCKS_UDP_LISTEN: ${SOCKS_UDP_LISTEN:-0.0.0.0:1080}
-      SOCKS_UDP_ADVERTISE: ${SOCKS_UDP_ADVERTISE:-}
-      SOCKS_USER: ${SOCKS_USER:-}
-      SOCKS_PASS: ${SOCKS_PASS:-}
+      # --- 校园 VPN 凭证（必填）---
+      TJ_USER: "你的学号"
+      TJ_PASSWORD: "你的密码"
 
-    # TCP serves CONNECT, UDP serves UDP ASSOCIATE. Publish both.
+      # --- VPN 网关（一般不用改）---
+      TJ_GATEWAY: "vpn.tongji.cn"
+      TJ_AUTH_METHOD: "LDAP3"
+      # 服务器 DNS 解析不了 vpn.tongji.cn 时，取消注释并填写网关 IP
+      # TJ_GATEWAY_ADDRESS: "202.120.189.34:443"
+
+      # --- SOCKS5 代理认证（公网部署必填）---
+      SOCKS_USER: "proxyuser"
+      SOCKS_PASS: "换一个强密码"
+
+      # --- 监听地址（容器内，一般不用改）---
+      SOCKS_LISTEN: "0.0.0.0:1080"
+      SOCKS_UDP_LISTEN: "0.0.0.0:1080"
+      # 返回给客户端的 UDP 中继地址。留空表示 0.0.0.0:1080，Clash / mihomo /
+      # sing-box / v2rayN 会自动替换成代理服务器地址。若客户端不认 0.0.0.0，
+      # 取消注释并填公网地址。
+      # SOCKS_UDP_ADVERTISE: "203.0.113.10:1080"
+
+      # --- 日志级别：debug / info / warn / error ---
+      TJ_LOG_LEVEL: "info"
+
+    # TCP 提供 CONNECT，UDP 提供 UDP ASSOCIATE，两者都要映射。
+    # 左侧是宿主机端口，想改端口只改左边（例如 7891:1080/tcp）。
     ports:
-      - "${SOCKS_PORT:-1080}:1080/tcp"
-      - "${SOCKS_PORT:-1080}:1080/udp"
+      - "1080:1080/tcp"
+      - "1080:1080/udp"
 
-    # Tiny footprint: the tunnel is a single TLS stream.
+    # 隧道只占用一条 TLS 连接，128 MB 绰绰有余。
     deploy:
       resources:
         limits:
           memory: 128M
 
-    # Container hardening: no writes and no capabilities are required.
+    # 容器加固：不需要写入磁盘，也不需要任何 capability。
     read_only: true
     security_opt:
       - no-new-privileges:true

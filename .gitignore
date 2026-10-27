@@ -1,7 +1,6 @@
-# Credentials and local configuration
+# Local secrets (never commit real credentials)
 .env
 .env.*
-!.env.example
 *.local.json
 
 # Build output

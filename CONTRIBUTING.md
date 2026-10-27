@@ -7,8 +7,10 @@ it manageable.
 
 - For anything larger than a bug fix, open an issue first so we can agree on
   the approach.
-- Never commit credentials, `.env` files, captured traffic or packet dumps
-  containing personal data.
+- Never commit real credentials. `docker-compose.yml` ships with
+  placeholders only; keep your edited copy out of git (it is listed in
+  `.gitignore` as `.env`, `*.local.json`, and a `compose.local.yml` override).
+- Never commit captured traffic or packet dumps containing personal data.
 
 ## Development
 
