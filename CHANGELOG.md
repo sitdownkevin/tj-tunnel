@@ -6,6 +6,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-10-27
+
+### Added
+
+- `-diagnose`: walks DNS → TCP → TLS → login against the gateway and reports
+  exactly which step fails. Run it in the container with
+  `docker compose run --rm tjsocks -diagnose`.
+
+### Fixed
+
+- SOCKS5 requests used to hang while the VPN tunnel was down (the listener
+  accepted connections but nothing served them). The proxy now serves for the
+  whole process and answers immediately with a failure reply, so clients fail
+  fast instead of timing out, and the server logs why.
+- The UDP relay socket is now fully released between reconnects, so a quick
+  reconnect can no longer fail to bind its port.
+
 ## [0.1.1] - 2026-10-27
 
 ### Changed

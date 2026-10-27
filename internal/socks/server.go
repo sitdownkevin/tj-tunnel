@@ -37,19 +37,36 @@ type Counters struct {
 	Down        atomic.Int64
 }
 
-// Server is a SOCKS5 proxy front end.
-type Server struct {
-	Listener net.Listener
+// Backend is the tunnel currently serving proxy requests.
+type Backend struct {
 	Resolver Resolver
 	Dialer   Dialer
+	UDP      *UDPRelay // nil disables UDP ASSOCIATE
+}
+
+// Server is a SOCKS5 proxy front end. It is created once per process; the
+// tunnel behind it is replaced with SetBackend on every reconnect, so clients
+// get an immediate, meaningful error instead of a hang while the VPN is down.
+type Server struct {
+	Listener net.Listener
 	Auth     *Auth // nil disables authentication
-	UDP      *UDPRelay
 	Log      *slog.Logger
 	Counters *Counters
 
 	// HandshakeTimeout bounds greeting + request parsing.
 	HandshakeTimeout time.Duration
+
+	backend atomic.Pointer[Backend]
 }
+
+// SetBackend publishes the tunnel that should serve new requests.
+func (s *Server) SetBackend(b *Backend) { s.backend.Store(b) }
+
+// ClearBackend marks the tunnel as gone; requests then fail fast.
+func (s *Server) ClearBackend() { s.backend.Store(nil) }
+
+// Backend returns the tunnel currently in use, or nil.
+func (s *Server) Backend() *Backend { return s.backend.Load() }
 
 // Serve accepts connections until ctx is cancelled.
 func (s *Server) Serve(ctx context.Context) {
@@ -57,9 +74,6 @@ func (s *Server) Serve(ctx context.Context) {
 		<-ctx.Done()
 		s.Listener.Close()
 	}()
-	if s.UDP != nil {
-		go s.UDP.Run(ctx)
-	}
 	var delay time.Duration
 	for {
 		c, err := s.Listener.Accept()
@@ -113,23 +127,33 @@ func (s *Server) handle(ctx context.Context, conn net.Conn) {
 	}
 	_ = conn.SetDeadline(time.Time{})
 
+	be := s.Backend()
+	if be == nil {
+		// The VPN tunnel is down (login failing or reconnecting). Answering
+		// immediately tells the client something is wrong, instead of the
+		// connection hanging until its own timeout.
+		s.Log.Warn("request refused: VPN tunnel is not ready", "client", conn.RemoteAddr())
+		_ = writeReply(conn, replyGeneralFailure)
+		return
+	}
+
 	switch req.cmd {
 	case cmdConnect:
-		s.handleConnect(ctx, conn, req)
+		s.handleConnect(ctx, conn, req, be)
 	case cmdUDPAssociate:
-		s.handleAssociate(ctx, conn, req)
+		s.handleAssociate(ctx, conn, req, be)
 	}
 }
 
-func (s *Server) handleConnect(ctx context.Context, conn net.Conn, req request) {
-	addr, err := s.Resolver.Lookup(ctx, req.host)
+func (s *Server) handleConnect(ctx context.Context, conn net.Conn, req request, be *Backend) {
+	addr, err := be.Resolver.Lookup(ctx, req.host)
 	if err != nil {
 		s.Log.Debug("resolve failed", "host", req.host, "err", err)
 		_ = writeReply(conn, replyHostUnreachable)
 		return
 	}
 	dst := netip.AddrPortFrom(addr, req.port)
-	remote, err := s.Dialer.DialTCP(ctx, dst)
+	remote, err := be.Dialer.DialTCP(ctx, dst)
 	if err != nil {
 		s.Log.Debug("dial failed", "dst", dst, "err", err)
 		_ = writeReply(conn, replyHostUnreachable)
@@ -149,8 +173,8 @@ func (s *Server) handleConnect(ctx context.Context, conn net.Conn, req request) 
 
 // handleAssociate registers a UDP association and keeps the control
 // connection open until the client closes it.
-func (s *Server) handleAssociate(ctx context.Context, conn net.Conn, req request) {
-	if s.UDP == nil {
+func (s *Server) handleAssociate(ctx context.Context, conn net.Conn, req request, be *Backend) {
+	if be.UDP == nil {
 		s.Log.Debug("UDP ASSOCIATE refused: UDP relay disabled")
 		_ = writeReply(conn, replyCmdNotSupported)
 		return
@@ -161,13 +185,13 @@ func (s *Server) handleAssociate(ctx context.Context, conn net.Conn, req request
 		return
 	}
 
-	assoc := s.UDP.Add(peerIP)
-	defer s.UDP.Remove(assoc)
+	assoc := be.UDP.Add(peerIP)
+	defer be.UDP.Remove(assoc)
 
-	if !writeReplyAddr(conn, replySuccess, s.UDP.Advertised()) {
+	if !writeReplyAddr(conn, replySuccess, be.UDP.Advertised()) {
 		return
 	}
-	s.Log.Debug("UDP association established", "client", peerIP, "relay", s.UDP.Advertised())
+	s.Log.Debug("UDP association established", "client", peerIP, "relay", be.UDP.Advertised())
 
 	// The association lives as long as the control connection.
 	_, _ = io.Copy(io.Discard, conn)

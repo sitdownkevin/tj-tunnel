@@ -20,6 +20,13 @@ func newTestServer(auth *Auth) *Server {
 	return &Server{Auth: auth, Log: discardLogger(), Counters: &Counters{}}
 }
 
+// newServerWithBackend returns a server whose tunnel is immediately usable.
+func newServerWithBackend(res Resolver, d Dialer, udp *UDPRelay) *Server {
+	s := newTestServer(nil)
+	s.SetBackend(&Backend{Resolver: res, Dialer: d, UDP: udp})
+	return s
+}
+
 func TestAuthenticateNoAuth(t *testing.T) {
 	server, client := net.Pipe()
 	defer client.Close()
@@ -227,12 +234,7 @@ func TestConnectRelaysBytes(t *testing.T) {
 	defer tunnelSide.Close()
 
 	dialer := &fakeDialer{tcpConn: tunnelSide}
-	s := &Server{
-		Resolver: staticResolver{"example.test": netip.MustParseAddr("10.0.0.7")},
-		Dialer:   dialer,
-		Log:      discardLogger(),
-		Counters: &Counters{},
-	}
+	s := newServerWithBackend(staticResolver{"example.test": netip.MustParseAddr("10.0.0.7")}, dialer, nil)
 	go s.handle(context.Background(), proxySide)
 
 	if _, err := clientSide.Write([]byte{Version, 1, methodNoAuth}); err != nil {
@@ -282,12 +284,7 @@ func TestConnectRelaysBytes(t *testing.T) {
 func TestConnectUnknownHostRepliesUnreachable(t *testing.T) {
 	proxySide, clientSide := net.Pipe()
 	defer clientSide.Close()
-	s := &Server{
-		Resolver: staticResolver{},
-		Dialer:   &fakeDialer{},
-		Log:      discardLogger(),
-		Counters: &Counters{},
-	}
+	s := newServerWithBackend(staticResolver{}, &fakeDialer{}, nil)
 	go s.handle(context.Background(), proxySide)
 
 	_, _ = clientSide.Write([]byte{Version, 1, methodNoAuth})
@@ -310,7 +307,7 @@ func TestConnectUnknownHostRepliesUnreachable(t *testing.T) {
 func TestAssociateWithoutRelayIsRefused(t *testing.T) {
 	proxySide, clientSide := net.Pipe()
 	defer clientSide.Close()
-	s := &Server{Resolver: staticResolver{}, Dialer: &fakeDialer{}, Log: discardLogger(), Counters: &Counters{}}
+	s := newServerWithBackend(staticResolver{}, &fakeDialer{}, nil)
 	go s.handle(context.Background(), proxySide)
 
 	_, _ = clientSide.Write([]byte{Version, 1, methodNoAuth})
@@ -324,6 +321,32 @@ func TestAssociateWithoutRelayIsRefused(t *testing.T) {
 	}
 	if reply[1] != replyCmdNotSupported {
 		t.Fatalf("reply code = %d, want %d", reply[1], replyCmdNotSupported)
+	}
+}
+
+func TestRequestWithoutTunnelFailsFast(t *testing.T) {
+	proxySide, clientSide := net.Pipe()
+	defer clientSide.Close()
+	s := newTestServer(nil) // no backend: the VPN tunnel is down
+	go s.handle(context.Background(), proxySide)
+
+	_, _ = clientSide.Write([]byte{Version, 1, methodNoAuth})
+	var method [2]byte
+	if _, err := io.ReadFull(clientSide, method[:]); err != nil {
+		t.Fatal(err)
+	}
+	req := []byte{Version, cmdConnect, 0, atypIPv4, 10, 0, 0, 1, 0x00, 0x50}
+	if _, err := clientSide.Write(req); err != nil {
+		t.Fatal(err)
+	}
+
+	_ = clientSide.SetReadDeadline(time.Now().Add(2 * time.Second))
+	var reply [10]byte
+	if _, err := io.ReadFull(clientSide, reply[:]); err != nil {
+		t.Fatalf("expected an immediate reply, got %v", err)
+	}
+	if reply[1] != replyGeneralFailure {
+		t.Fatalf("reply code = %d, want %d", reply[1], replyGeneralFailure)
 	}
 }
 

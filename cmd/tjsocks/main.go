@@ -46,6 +46,16 @@ func main() {
 			os.Exit(1)
 		}
 		return
+	case "-diagnose", "--diagnose":
+		cfg, err := config.Load(os.Args[2:], os.Getenv)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "tjsocks: "+err.Error())
+			os.Exit(1)
+		}
+		if err := diagnose(cfg, os.Stdout); err != nil {
+			os.Exit(1)
+		}
+		return
 	case "-help", "--help", "-h":
 		usage()
 		return
@@ -69,6 +79,7 @@ func usage() {
 Usage:
   tjsocks [flags]
   tjsocks -healthcheck [host:port]   probe a running instance
+  tjsocks -diagnose                  test DNS/TCP/TLS/login against the gateway
   tjsocks -version                   print build information
 
 Flags:
@@ -110,11 +121,21 @@ func run() error {
 	defer listener.Close()
 	logger.Info("SOCKS5 listening, waiting for the VPN tunnel", "addr", cfg.Listen)
 
-	return serve(ctx, cfg, listener, logger)
+	server := &socks.Server{
+		Listener: listener,
+		Log:      logger,
+		Counters: &socks.Counters{},
+	}
+	if cfg.AuthEnabled() {
+		server.Auth = &socks.Auth{Username: cfg.SocksUser, Password: cfg.SocksPass}
+	}
+	go server.Serve(ctx)
+
+	return serve(ctx, cfg, server, logger)
 }
 
 // serve runs the login/tunnel/serve loop, reconnecting with backoff.
-func serve(ctx context.Context, cfg *config.Config, listener net.Listener, logger *slog.Logger) error {
+func serve(ctx context.Context, cfg *config.Config, server *socks.Server, logger *slog.Logger) error {
 	var attempt int
 	for ctx.Err() == nil {
 		if attempt > 0 {
@@ -129,7 +150,7 @@ func serve(ctx context.Context, cfg *config.Config, listener net.Listener, logge
 		attempt++
 
 		started := time.Now()
-		err := session(ctx, cfg, listener, logger)
+		err := session(ctx, cfg, server, logger)
 		if ctx.Err() != nil {
 			return nil
 		}
@@ -142,7 +163,7 @@ func serve(ctx context.Context, cfg *config.Config, listener net.Listener, logge
 }
 
 // session logs in, serves until the tunnel dies, then cleans up.
-func session(ctx context.Context, cfg *config.Config, listener net.Listener, logger *slog.Logger) error {
+func session(ctx context.Context, cfg *config.Config, server *socks.Server, logger *slog.Logger) error {
 	gateway := protocol.Gateway{
 		Host:    cfg.Gateway,
 		Address: cfg.GatewayAddress,
@@ -181,33 +202,26 @@ func session(ctx context.Context, cfg *config.Config, listener net.Listener, log
 	}
 	logger.Info("tunnel ready", "tunnel_ip", tun.LocalIP, "dns", dnsServers)
 
-	counters := &socks.Counters{}
 	network := &netstack.Network{Stack: tun.Stack}
-	server := &socks.Server{
-		Listener: listener,
-		Resolver: res,
-		Dialer:   network,
-		Log:      logger,
-		Counters: counters,
-	}
-	if cfg.AuthEnabled() {
-		server.Auth = &socks.Auth{Username: cfg.SocksUser, Password: cfg.SocksPass}
-	}
-	if relay, err := socks.NewUDPRelay(cfg.UDPListen, cfg.UDPAdvertise, res, network, logger, counters); err != nil {
+	backend := &socks.Backend{Resolver: res, Dialer: network}
+
+	if relay, err := socks.NewUDPRelay(cfg.UDPListen, cfg.UDPAdvertise, res, network, logger, server.Counters); err != nil {
 		logger.Warn("UDP relay disabled, serving TCP only", "err", err)
 	} else {
+		relayCtx, stopRelay := context.WithCancel(ctx)
+		defer stopRelay()
 		defer relay.Close()
-		server.UDP = relay
+		defer relay.Wait()
+		backend.UDP = relay
+		go relay.Run(relayCtx)
 		logger.Info("SOCKS5 ready",
 			"tcp", cfg.Listen, "udp", cfg.UDPListen, "advertise", cfg.UDPAdvertise)
 	}
 
-	serveCtx, stopServe := context.WithCancel(ctx)
-	defer stopServe()
-	go server.Serve(serveCtx)
+	server.SetBackend(backend)
+	defer server.ClearBackend()
 
 	err = <-tun.Done
-	stopServe()
 	tun.Logout()
 	return err
 }

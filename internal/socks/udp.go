@@ -33,6 +33,7 @@ type UDPRelay struct {
 	assocs map[*Association]struct{}
 
 	lookups chan struct{} // bounds concurrent DNS lookups
+	done    chan struct{} // closed when Run returns
 }
 
 // NewUDPRelay binds the relay socket. advertise is the address returned to
@@ -67,6 +68,7 @@ func NewUDPRelay(bind, advertise string, r Resolver, d Dialer, log *slog.Logger,
 		counters: c,
 		assocs:   make(map[*Association]struct{}),
 		lookups:  make(chan struct{}, udpMaxLookups),
+		done:     make(chan struct{}),
 	}, nil
 }
 
@@ -76,8 +78,13 @@ func (r *UDPRelay) Advertised() netip.AddrPort { return r.addr }
 // Close stops the relay socket.
 func (r *UDPRelay) Close() error { return r.conn.Close() }
 
+// Wait blocks until Run has returned, so the socket is fully released before
+// the next session binds the same port.
+func (r *UDPRelay) Wait() { <-r.done }
+
 // Run reads datagrams until ctx is cancelled.
 func (r *UDPRelay) Run(ctx context.Context) {
+	defer close(r.done)
 	go func() {
 		<-ctx.Done()
 		r.conn.Close()

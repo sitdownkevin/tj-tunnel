@@ -138,6 +138,7 @@ go build -mod=vendor -o tjsocks ./cmd/tjsocks
 -config                  JSON 配置文件
 -log-level               日志级别
 -healthcheck <addr>      探测本地 SOCKS5（容器健康检查用）
+-diagnose                逐项诊断 DNS / TCP / TLS / 登录
 -version                 打印版本
 ```
 
@@ -207,6 +208,8 @@ make rename MODULE=github.com/你的用户名/tjsocks
 | 日志 `authentication failed` | 账号或密码错；确认认证方式是 `LDAP3`（`TJ_AUTH_METHOD`） |
 | 日志 `gateway terminated the session (reason 1)` | 同一账号在别处登录了，顶掉了本会话。**一个账号同时只能有一个会话** |
 | 一直 `reconnecting` / `no such host` | 服务器 DNS 解析不了 `vpn.tongji.cn`，在 compose 里取消注释并设置 `TJ_GATEWAY_ADDRESS: "202.120.189.34:443"` |
+| 不知道卡在哪一步 | 在服务器上运行 `docker compose run --rm tjsocks -diagnose`，会逐项检查 DNS / TCP / TLS / 登录 |
+| 客户端连上就报错 / 日志 `tunnel is not ready` | 容器在跑但 VPN 未登录成功，先看上面的诊断结果 |
 | TCP 正常、UDP 不通 | 确认 compose 里 `1080/udp` 也映射了；必要时设 `SOCKS_UDP_ADVERTISE` |
 | 容器 `unhealthy` | `docker logs` 查看是否还在重连；健康检查 30 s 一次 |
 | 校内域名解析到公网地址 | 客户端要用 `socks5h`（域名交给代理解析） |
