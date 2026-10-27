@@ -1,0 +1,19 @@
+# Keep the build context minimal: the Dockerfile only needs sources + vendor.
+.git
+.github
+.env
+.env.*
+*.md
+docs/
+bin/
+dist/
+tjsocks
+tjsocks-*
+coverage.out
+Dockerfile
+docker-compose.yml
+.dockerignore
+.gitignore
+.editorconfig
+Makefile
+LICENSE

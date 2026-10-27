@@ -1,0 +1,18 @@
+# Credentials and local configuration
+.env
+.env.*
+!.env.example
+*.local.json
+
+# Build output
+/bin/
+/tjsocks
+/tjsocks-*
+coverage.out
+/dist/
+
+# Editors and OS
+.DS_Store
+.idea/
+.vscode/
+*.swp

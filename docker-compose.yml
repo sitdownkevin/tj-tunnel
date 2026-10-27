@@ -1,0 +1,53 @@
+services:
+  tjsocks:
+    # Published by the GitHub Actions workflow. Replace OWNER with your
+    # Docker Hub account (or point at ghcr.io/OWNER/tjsocks).
+    image: ${TJSOCKS_IMAGE:-docker.io/your-dockerhub-user/tjsocks:latest}
+    container_name: tjsocks
+    restart: unless-stopped
+
+    # Values are read from ./.env (Compose loads it automatically for
+    # interpolation). Copy .env.example to .env and fill it in.
+    environment:
+      TJ_USER: ${TJ_USER:?set TJ_USER in .env}
+      TJ_PASSWORD: ${TJ_PASSWORD:?set TJ_PASSWORD in .env}
+      TJ_AUTH_METHOD: ${TJ_AUTH_METHOD:-}
+      TJ_GATEWAY: ${TJ_GATEWAY:-vpn.tongji.cn}
+      TJ_GATEWAY_ADDRESS: ${TJ_GATEWAY_ADDRESS:-}
+      TJ_LOG_LEVEL: ${TJ_LOG_LEVEL:-info}
+      SOCKS_LISTEN: ${SOCKS_LISTEN:-0.0.0.0:1080}
+      SOCKS_UDP_LISTEN: ${SOCKS_UDP_LISTEN:-0.0.0.0:1080}
+      SOCKS_UDP_ADVERTISE: ${SOCKS_UDP_ADVERTISE:-}
+      SOCKS_USER: ${SOCKS_USER:-}
+      SOCKS_PASS: ${SOCKS_PASS:-}
+
+    # TCP serves CONNECT, UDP serves UDP ASSOCIATE. Publish both.
+    ports:
+      - "${SOCKS_PORT:-1080}:1080/tcp"
+      - "${SOCKS_PORT:-1080}:1080/udp"
+
+    # Tiny footprint: the tunnel is a single TLS stream.
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
+    # Container hardening: no writes and no capabilities are required.
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/tjsocks", "-healthcheck", "127.0.0.1:1080"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
