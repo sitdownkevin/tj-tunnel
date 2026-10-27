@@ -6,6 +6,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Container images are published only to the GitHub Container Registry
+  (`ghcr.io/sitdownkevin/tjsocks`); Docker Hub support and its secrets were
+  removed, so publishing needs no configuration at all.
+- All settings now live inline in `docker-compose.yml`; the `.env` file and
+  `.env.example` are gone, so deployment is a single file.
+
 ## [0.1.0] - 2026-10-27
 
 ### Added
