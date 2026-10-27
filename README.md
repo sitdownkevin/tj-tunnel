@@ -24,6 +24,7 @@
 - **容器安全**：distroless + 非 root + 只读根文件系统 + 无 capability
 - **多架构镜像**：`linux/amd64`、`linux/arm64`（树莓派 / ARM VPS 可用）
 - **零配置发布**：GitHub Actions 自动构建并推送到 GHCR，服务器一条命令拉取
+- **实时状态面板**：内置 Web 界面（SSE 推送），看隧道状态、速率、连接数，零外部依赖
 
 ## 快速开始
 
@@ -51,6 +52,14 @@ environment:
 
 镜像来自 GitHub Container Registry：`ghcr.io/sitdownkevin/tjsocks:latest`
 （公开包，拉取无需登录）。
+
+部署完成后可以打开状态面板看实时情况：
+
+```
+http://服务器IP:8080      # 账号密码同 SOCKS_USER / SOCKS_PASS
+```
+
+不需要面板就把 compose 里的 `WEB_LISTEN` 留空、并删掉 `8080:8080/tcp` 那行端口。
 
 > 想锁定版本就改成 `ghcr.io/sitdownkevin/tjsocks:0.1.1`。
 > 升级：`docker compose pull && docker compose up -d`。
@@ -93,6 +102,8 @@ curl -x socks5h://proxyuser:密码@服务器IP:1080 https://api.ip.sb/ip
 | `TJ_GATEWAY` | VPN 网关域名 | `vpn.tongji.cn` |
 | `TJ_GATEWAY_ADDRESS` | 网关 `IP:端口`，DNS 解析不了时直连 | 空 |
 | `TJ_AUTH_METHOD` | 认证方式 | `LDAP3` |
+| `WEB_LISTEN` | Web 状态面板监听地址，留空关闭 | 空 |
+| `WEB_USER` / `WEB_PASS` | 面板独立登录（默认沿用 SOCKS 认证） | 同 SOCKS |
 | `TJ_LOG_LEVEL` | `debug` / `info` / `warn` / `error` | `info` |
 
 ### 改宿主机端口
@@ -104,6 +115,22 @@ ports:
   - "7891:1080/tcp"
   - "7891:1080/udp"
 ```
+
+## 状态面板
+
+开启 `WEB_LISTEN` 后，浏览器访问 `http://服务器IP:8080` 即可看到实时状态：
+
+- 隧道阶段（启动中 / 登录中 / 运行中 / 重连中）与会话时长
+- 隧道 IP、网关、认证方式、校内 DNS
+- 上/下行实时速率与累计流量、活跃连接数与累计连接数
+- 最近一次错误（登录失败、会话被顶下线等）
+
+实现上不引入任何前端框架：界面是编译进二进制的单个 HTML 文件，状态通过
+Server-Sent Events 每秒推送一次，断线自动重连并降级为轮询。面板进程由代理
+常驻，隧道断开时页面会立刻变成“重连中”，不会卡在旧数据上。
+
+> 面板默认使用 `SOCKS_USER` / `SOCKS_PASS` 做 HTTP Basic 认证。用独立账号
+> 就设置 `WEB_USER` / `WEB_PASS`。**不要**在公网把面板裸奔。
 
 ### 关于 UDP 通告地址
 
@@ -139,6 +166,7 @@ go build -mod=vendor -o tjsocks ./cmd/tjsocks
 -log-level               日志级别
 -healthcheck <addr>      探测本地 SOCKS5（容器健康检查用）
 -diagnose                逐项诊断 DNS / TCP / TLS / 登录
+-web-listen <addr>       开启 Web 状态面板，例如 0.0.0.0:8080
 -version                 打印版本
 ```
 

@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tjsocks · 状态</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --border:#21262d; --text:#e6edf3; --dim:#8b949e;
+    --ok:#3fb950; --warn:#d29922; --err:#f85149; --accent:#58a6ff; --up:#3fb950; --down:#58a6ff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+    font:14px/1.5 ui-sans-serif,-apple-system,"Segoe UI","Noto Sans SC",sans-serif;
+    -webkit-font-smoothing:antialiased}
+  .wrap{max-width:960px;margin:0 auto;padding:28px 20px 40px}
+  header{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:24px}
+  h1{font-size:17px;font-weight:600;margin:0;letter-spacing:.2px}
+  h1 span{color:var(--dim);font-weight:400}
+  .pill{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;
+    font-size:12px;font-weight:600;border:1px solid var(--border);background:var(--panel)}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--dim)}
+  .pill.ready{color:var(--ok);border-color:#238636}
+  .pill.ready .dot{background:var(--ok);box-shadow:0 0 0 0 rgba(63,185,80,.7);animation:pulse 2s infinite}
+  .pill.connecting,.pill.reconnecting{color:var(--warn);border-color:#9e6a03}
+  .pill.connecting .dot,.pill.reconnecting .dot{background:var(--warn)}
+  .pill.stopped{color:var(--err);border-color:#da3633}
+  .pill.stopped .dot{background:var(--err)}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(63,185,80,.5)}70%{box-shadow:0 0 0 7px rgba(63,185,80,0)}100%{box-shadow:0 0 0 0 rgba(63,185,80,0)}}
+  .spacer{flex:1}
+  .muted{color:var(--dim);font-size:12px}
+  .grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(210px,1fr))}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:14px 16px}
+  .card h2{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--dim);
+    margin:0 0 10px;font-weight:600}
+  .value{font-size:20px;font-weight:600;font-variant-numeric:tabular-nums;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;overflow-wrap:anywhere}
+  .value.small{font-size:13px;font-weight:500;line-height:1.7}
+  .sub{margin-top:6px;font-size:12px;color:var(--dim);font-variant-numeric:tabular-nums}
+  .traffic{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px}
+  .t-item{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:14px 16px}
+  .t-head{display:flex;align-items:center;gap:6px;font-size:11px;letter-spacing:.08em;
+    text-transform:uppercase;color:var(--dim);margin-bottom:8px}
+  .arrow{font-size:13px}
+  .rate{font-size:22px;font-weight:600;font-variant-numeric:tabular-nums;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .total{font-size:12px;color:var(--dim);margin-top:4px;font-variant-numeric:tabular-nums}
+  .alert{margin-top:14px;padding:12px 14px;border-radius:10px;font-size:13px;
+    border:1px solid #da3633;background:#2d1214;color:#ffb3ae;display:none}
+  .alert.show{display:block}
+  footer{margin-top:26px;display:flex;gap:14px;flex-wrap:wrap;color:var(--dim);font-size:12px}
+  code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;background:#0b0f14;
+    border:1px solid var(--border);border-radius:5px;padding:1px 6px;font-size:12px}
+  .tag{display:inline-block;padding:1px 7px;border-radius:5px;font-size:11px;
+    border:1px solid var(--border);color:var(--dim)}
+  .tag.on{color:var(--ok);border-color:#238636}
+  @media(max-width:560px){.traffic{grid-template-columns:1fr}.value{font-size:18px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>tjsocks <span>· 校园 VPN → SOCKS5</span></h1>
+    <span class="pill" id="phase"><span class="dot"></span><span id="phase-text">连接中</span></span>
+    <span class="spacer"></span>
+    <span class="muted" id="conn-state">已连接</span>
+  </header>
+
+  <div class="grid">
+    <div class="card">
+      <h2>隧道 IP</h2>
+      <div class="value" id="tunnel-ip">—</div>
+      <div class="sub" id="session-uptime">—</div>
+    </div>
+    <div class="card">
+      <h2>活跃连接</h2>
+      <div class="value" id="active">0</div>
+      <div class="sub"><span id="total-conns">0</span> 累计连接</div>
+    </div>
+    <div class="card">
+      <h2>运行时长</h2>
+      <div class="value" id="uptime">—</div>
+      <div class="sub" id="version">—</div>
+    </div>
+    <div class="card">
+      <h2>网关</h2>
+      <div class="value small" id="gateway">—</div>
+      <div class="sub" id="auth-method">—</div>
+    </div>
+  </div>
+
+  <div class="traffic">
+    <div class="t-item">
+      <div class="t-head"><span class="arrow" style="color:var(--up)">↑</span> 上行</div>
+      <div class="rate" id="up-rate" style="color:var(--up)">0 B/s</div>
+      <div class="total" id="up-total">共 0 B</div>
+    </div>
+    <div class="t-item">
+      <div class="t-head"><span class="arrow" style="color:var(--down)">↓</span> 下行</div>
+      <div class="rate" id="down-rate" style="color:var(--down)">0 B/s</div>
+      <div class="total" id="down-total">共 0 B</div>
+    </div>
+  </div>
+
+  <div class="grid" style="margin-top:12px">
+    <div class="card">
+      <h2>校内 DNS</h2>
+      <div class="value small" id="dns">—</div>
+    </div>
+    <div class="card">
+      <h2>监听</h2>
+      <div class="value small" id="listen">—</div>
+      <div class="sub" id="udp-relay">UDP 未启用</div>
+    </div>
+    <div class="card">
+      <h2>代理认证</h2>
+      <div class="value small" id="proxy-auth">—</div>
+      <div class="sub" id="attempts">—</div>
+    </div>
+  </div>
+
+  <div class="alert" id="alert"></div>
+
+  <footer>
+    <span>客户端连接 <code id="client-url">—</code></span>
+    <span class="tag" id="udp-tag">UDP</span>
+  </footer>
+</div>
+
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const PHASE_TEXT = { starting: "启动中", connecting: "登录中", ready: "运行中",
+                       reconnecting: "重连中", stopped: "已停止" };
+
+  function bytes(n) {
+    n = Number(n) || 0;
+    const u = ["B", "KB", "MB", "GB", "TB"];
+    let i = 0;
+    while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+    return (i === 0 ? n.toFixed(0) : n.toFixed(n < 10 ? 2 : 1)) + " " + u[i];
+  }
+  function rate(n) { return bytes(n) + "/s"; }
+  function duration(sec) {
+    sec = Math.max(0, Math.floor(Number(sec) || 0));
+    const d = Math.floor(sec / 86400), h = Math.floor(sec % 86400 / 3600),
+          m = Math.floor(sec % 3600 / 60), s = sec % 60;
+    if (d) return d + " 天 " + h + " 小时";
+    if (h) return h + " 小时 " + m + " 分";
+    if (m) return m + " 分 " + s + " 秒";
+    return s + " 秒";
+  }
+
+  function render(d) {
+    const phase = $("phase");
+    phase.className = "pill " + d.phase;
+    $("phase-text").textContent = PHASE_TEXT[d.phase] || d.phase;
+
+    $("tunnel-ip").textContent = d.tunnel_ip || "—";
+    $("session-uptime").textContent = d.session_uptime > 0
+      ? "本次会话 " + duration(d.session_uptime) : "尚未建立会话";
+    $("active").textContent = d.active_connections;
+    $("total-conns").textContent = d.connections;
+    $("uptime").textContent = duration(d.uptime);
+    $("version").textContent = d.version;
+    $("gateway").textContent = d.gateway || "—";
+    $("auth-method").textContent = d.auth_method || "—";
+
+    $("up-rate").textContent = rate(d.up_rate);
+    $("down-rate").textContent = rate(d.down_rate);
+    $("up-total").textContent = "共 " + bytes(d.up_total);
+    $("down-total").textContent = "共 " + bytes(d.down_total);
+
+    $("dns").textContent = (d.dns && d.dns.length) ? d.dns.join("  ·  ") : "—";
+    $("listen").textContent = d.listen || "—";
+    $("udp-relay").textContent = d.udp_live ? "UDP 中继 " + d.udp_relay : "UDP 未启用";
+    $("proxy-auth").textContent = d.proxy_auth ? "已开启" : "未开启（可公开访问）";
+    $("attempts").textContent = d.attempts > 0 ? "已重试 " + d.attempts + " 次" : "连接稳定";
+
+    const alert = $("alert");
+    if (d.last_error && d.phase !== "ready") {
+      alert.textContent = d.last_error;
+      alert.classList.add("show");
+    } else {
+      alert.classList.remove("show");
+    }
+
+    const tag = $("udp-tag");
+    tag.textContent = d.udp_live ? "UDP ✓" : "UDP ✗";
+    tag.className = "tag" + (d.udp_live ? " on" : "");
+
+    const host = location.hostname || "服务器地址";
+    const port = (d.listen || "").split(":").pop() || "1080";
+    $("client-url").textContent = "socks5h://" + host + ":" + port;
+  }
+
+  function markOffline(offline) {
+    $("conn-state").textContent = offline ? "状态流已断开，重试中…" : "已连接";
+  }
+
+  let source = null;
+  function connect() {
+    if (source) source.close();
+    source = new EventSource("/api/events");
+    source.onopen = () => markOffline(false);
+    source.onmessage = (e) => { try { render(JSON.parse(e.data)); } catch (_) {} };
+    source.onerror = () => {
+      markOffline(true);
+      // EventSource retries on its own; fall back to polling if it gives up.
+      if (source.readyState === EventSource.CLOSED) {
+        source.close();
+        source = null;
+        poll();
+      }
+    };
+  }
+
+  let pollTimer = null;
+  function poll() {
+    if (pollTimer) return;
+    const tick = async () => {
+      try {
+        const r = await fetch("/api/status", { cache: "no-store" });
+        if (r.ok) { render(await r.json()); markOffline(false); }
+      } catch (_) { markOffline(true); }
+    };
+    tick();
+    pollTimer = setInterval(tick, 2000);
+  }
+
+  if ("EventSource" in window) connect(); else poll();
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && !source && !pollTimer) connect();
+  });
+})();
+</script>
+</body>
+</html>

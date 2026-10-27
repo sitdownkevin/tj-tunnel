@@ -32,6 +32,14 @@ services:
       # 取消注释并填公网地址。
       # SOCKS_UDP_ADVERTISE: "203.0.113.10:1080"
 
+      # --- Web 状态面板 ---
+      # 开启后访问 http://服务器IP:8080 查看实时状态（SSE 推送）。
+      # 留空则关闭面板。登录账号默认沿用上面的 SOCKS_USER / SOCKS_PASS。
+      WEB_LISTEN: "0.0.0.0:8080"
+      # 想用单独的账号密码就取消注释：
+      # WEB_USER: "admin"
+      # WEB_PASS: "换一个强密码"
+
       # --- 日志级别：debug / info / warn / error ---
       TJ_LOG_LEVEL: "info"
 
@@ -40,6 +48,8 @@ services:
     ports:
       - "1080:1080/tcp"
       - "1080:1080/udp"
+      # Web 状态面板；不需要就在上面把 WEB_LISTEN 留空并删掉这行
+      - "8080:8080/tcp"
 
     # 隧道只占用一条 TLS 连接，128 MB 绰绰有余。
     deploy:

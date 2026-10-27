@@ -30,12 +30,21 @@ type Auth struct {
 	Password string
 }
 
-// Counters track aggregate traffic for logging.
+// Counters track aggregate traffic for logging and the status dashboard.
 type Counters struct {
-	Connections atomic.Int64
-	Up          atomic.Int64
-	Down        atomic.Int64
+	Connections atomic.Int64 // currently open proxy connections
+	Total       atomic.Int64 // connections accepted since start
+	Up          atomic.Int64 // bytes sent into the tunnel
+	Down        atomic.Int64 // bytes received from the tunnel
 }
+
+// Snapshot returns the counters without blocking.
+func (c *Counters) Snapshot() (total, up, down int64) {
+	return c.Total.Load(), c.Up.Load(), c.Down.Load()
+}
+
+// ActiveConnections returns the number of open proxy connections.
+func (c *Counters) ActiveConnections() int64 { return c.Connections.Load() }
 
 // Backend is the tunnel currently serving proxy requests.
 type Backend struct {
@@ -105,6 +114,7 @@ func (s *Server) handle(ctx context.Context, conn net.Conn) {
 	defer conn.Close()
 	if s.Counters != nil {
 		s.Counters.Connections.Add(1)
+		s.Counters.Total.Add(1)
 		defer s.Counters.Connections.Add(-1)
 	}
 	timeout := s.HandshakeTimeout

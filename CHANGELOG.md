@@ -6,6 +6,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-10-27
+
+### Added
+
+- Built-in web dashboard (`WEB_LISTEN`) showing tunnel phase, tunnel IP,
+  gateway, DNS, live up/down rates, totals, connection counts and the last
+  error. The page is a single embedded HTML file with no framework, updated
+  over Server-Sent Events once per second, with automatic reconnect and a
+  polling fallback.
+- Dashboard authentication reuses the SOCKS credentials by default, and
+  `WEB_USER` / `WEB_PASS` override them.
+
+### Fixed
+
+- Session teardown could deadlock: the UDP relay waited for its reader before
+  the socket was closed, so a dropped tunnel never logged the disconnect and
+  never reconnected. Teardown now cancels, closes, then waits, and the
+  dashboard reflects "reconnecting" immediately.
+- `auth_method` defaulted to an empty string instead of `LDAP3` in reports.
+
 ## [0.1.2] - 2026-10-27
 
 ### Added

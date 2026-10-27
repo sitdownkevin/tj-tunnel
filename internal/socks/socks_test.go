@@ -396,3 +396,25 @@ func TestAssocReusesDestinationSocket(t *testing.T) {
 		t.Fatal("idle destination socket should have been reaped")
 	}
 }
+
+func TestUDPRelayTeardownDoesNotDeadlock(t *testing.T) {
+	relay, err := NewUDPRelay("127.0.0.1:0", "127.0.0.1:0", staticResolver{}, &fakeDialer{}, discardLogger(), &Counters{})
+	if err != nil {
+		t.Fatalf("NewUDPRelay: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	go relay.Run(ctx)
+
+	// Mirror the production teardown order: cancel, close, then wait.
+	cancel()
+	if err := relay.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+		t.Fatalf("Close: %v", err)
+	}
+	done := make(chan struct{})
+	go func() { relay.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("Wait blocked after Close: teardown would deadlock")
+	}
+}

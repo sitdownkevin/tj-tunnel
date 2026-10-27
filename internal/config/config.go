@@ -35,6 +35,11 @@ type Config struct {
 
 	// LogLevel is one of debug, info, warn, error.
 	LogLevel string
+
+	// Web dashboard.
+	WebListen string // empty disables it
+	WebUser   string // empty reuses the SOCKS credentials
+	WebPass   string
 }
 
 // file mirrors Config for JSON (de)serialisation.
@@ -50,6 +55,9 @@ type file struct {
 	SocksUser      string `json:"socks_user"`
 	SocksPass      string `json:"socks_pass"`
 	LogLevel       string `json:"log_level"`
+	WebListen      string `json:"web_listen"`
+	WebUser        string `json:"web_user"`
+	WebPass        string `json:"web_pass"`
 }
 
 func (c *Config) apply(f *file) {
@@ -69,6 +77,9 @@ func (c *Config) apply(f *file) {
 	set(&c.SocksUser, f.SocksUser)
 	set(&c.SocksPass, f.SocksPass)
 	set(&c.LogLevel, f.LogLevel)
+	set(&c.WebListen, f.WebListen)
+	set(&c.WebUser, f.WebUser)
+	set(&c.WebPass, f.WebPass)
 }
 
 // Load resolves configuration with the following precedence (low to high):
@@ -90,6 +101,9 @@ func Load(args []string, getenv func(string) string) (*Config, error) {
 		socksUser  = fs.String("socks-user", "", "SOCKS5 authentication username (optional)")
 		socksPass  = fs.String("socks-pass", "", "SOCKS5 authentication password (optional)")
 		logLevel   = fs.String("log-level", "", "log level: debug, info, warn or error")
+		webListen  = fs.String("web-listen", "", "web dashboard listen address, e.g. 0.0.0.0:8080 (empty disables it)")
+		webUser    = fs.String("web-user", "", "dashboard basic auth username (defaults to the SOCKS user)")
+		webPass    = fs.String("web-pass", "", "dashboard basic auth password (defaults to the SOCKS password)")
 	)
 	if err := fs.Parse(args); err != nil {
 		return nil, err
@@ -124,6 +138,9 @@ func Load(args []string, getenv func(string) string) (*Config, error) {
 	env(&cfg.SocksPass, "SOCKS_PASS")
 	env(&cfg.LogLevel, "TJ_LOG_LEVEL")
 	env(&cfg.LogLevel, "LOG_LEVEL")
+	env(&cfg.WebListen, "WEB_LISTEN")
+	env(&cfg.WebUser, "WEB_USER")
+	env(&cfg.WebPass, "WEB_PASS")
 
 	// Flags win over everything.
 	for _, f := range []struct {
@@ -138,6 +155,9 @@ func Load(args []string, getenv func(string) string) (*Config, error) {
 		{&cfg.SocksUser, *socksUser},
 		{&cfg.SocksPass, *socksPass},
 		{&cfg.LogLevel, *logLevel},
+		{&cfg.WebListen, *webListen},
+		{&cfg.WebUser, *webUser},
+		{&cfg.WebPass, *webPass},
 	} {
 		if f.val != "" {
 			*f.dst = f.val
@@ -166,6 +186,9 @@ func (c *Config) loadFile(path string, required bool) error {
 
 // derive fills in values that depend on other settings.
 func (c *Config) derive() {
+	if c.AuthMethod == "" {
+		c.AuthMethod = "LDAP3"
+	}
 	if c.UDPListen == "" {
 		c.UDPListen = ":" + Port(c.Listen)
 	}
@@ -202,7 +225,25 @@ func (c *Config) Validate() error {
 	default:
 		return fmt.Errorf("log_level %q must be one of debug, info, warn, error", c.LogLevel)
 	}
+	if c.WebListen != "" {
+		if _, _, err := net.SplitHostPort(c.WebListen); err != nil {
+			return fmt.Errorf("web_listen %q is not a host:port address: %w", c.WebListen, err)
+		}
+		if !c.AuthEnabled() && c.WebUser != "" && c.WebPass == "" {
+			return errors.New("web_user requires web_pass")
+		}
+	}
 	return nil
+}
+
+// DashboardAuth returns the credentials the dashboard should require. It
+// defaults to the SOCKS credentials so a public deployment is never left wide
+// open just because the dashboard was enabled.
+func (c *Config) DashboardAuth() (string, string) {
+	if c.WebUser != "" {
+		return c.WebUser, c.WebPass
+	}
+	return c.SocksUser, c.SocksPass
 }
 
 // AuthEnabled reports whether SOCKS5 authentication is configured.
@@ -229,6 +270,10 @@ func (c *Config) Describe() string {
 	if c.GatewayAddress != "" {
 		gateway += " via " + c.GatewayAddress
 	}
-	return fmt.Sprintf("gateway=%s listen=%s udp=%s advertise=%s auth=%s user=%s",
-		gateway, c.Listen, c.UDPListen, c.UDPAdvertise, auth, c.Username)
+	web := "off"
+	if c.WebListen != "" {
+		web = c.WebListen
+	}
+	return fmt.Sprintf("gateway=%s listen=%s udp=%s advertise=%s auth=%s web=%s user=%s",
+		gateway, c.Listen, c.UDPListen, c.UDPAdvertise, auth, web, c.Username)
 }

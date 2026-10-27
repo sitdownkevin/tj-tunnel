@@ -22,8 +22,10 @@ import (
 	"github.com/sitdownkevin/tjsocks/internal/protocol"
 	"github.com/sitdownkevin/tjsocks/internal/resolver"
 	"github.com/sitdownkevin/tjsocks/internal/socks"
+	"github.com/sitdownkevin/tjsocks/internal/status"
 	"github.com/sitdownkevin/tjsocks/internal/tunnel"
 	"github.com/sitdownkevin/tjsocks/internal/version"
+	"github.com/sitdownkevin/tjsocks/internal/web"
 )
 
 const (
@@ -90,10 +92,12 @@ Flags:
   -socks-user/-socks-pass SOCKS5 authentication (optional)
   -config                JSON configuration file
   -log-level             debug|info|warn|error (default "info")
+  -web-listen            开启 Web 状态面板，例如 0.0.0.0:8080（默认关闭）
+  -web-user/-web-pass    面板登录认证（默认沿用 SOCKS_USER / SOCKS_PASS）
 
 Environment variables: TJ_USER, TJ_PASSWORD, TJ_AUTH_METHOD, TJ_GATEWAY,
 TJ_GATEWAY_ADDRESS, TJ_LOG_LEVEL, SOCKS_LISTEN, SOCKS_UDP_LISTEN,
-SOCKS_UDP_ADVERTISE, SOCKS_USER, SOCKS_PASS.
+SOCKS_UDP_ADVERTISE, SOCKS_USER, SOCKS_PASS, WEB_LISTEN, WEB_USER, WEB_PASS.
 `)
 }
 
@@ -121,21 +125,42 @@ func run() error {
 	defer listener.Close()
 	logger.Info("SOCKS5 listening, waiting for the VPN tunnel", "addr", cfg.Listen)
 
+	counters := &socks.Counters{}
 	server := &socks.Server{
 		Listener: listener,
 		Log:      logger,
-		Counters: &socks.Counters{},
+		Counters: counters,
 	}
 	if cfg.AuthEnabled() {
 		server.Auth = &socks.Auth{Username: cfg.SocksUser, Password: cfg.SocksPass}
 	}
 	go server.Serve(ctx)
 
-	return serve(ctx, cfg, server, logger)
+	state := status.New(version.Version, counters)
+	state.SetConfig(cfg.Gateway, cfg.AuthMethod, cfg.Listen, cfg.UDPListen, cfg.AuthEnabled())
+
+	if cfg.WebListen != "" {
+		user, pass := cfg.DashboardAuth()
+		dash := web.New(web.Options{
+			Addr:     cfg.WebListen,
+			Username: user,
+			Password: pass,
+			Log:      logger,
+			State:    state,
+		})
+		defer dash.Shutdown()
+		go func() {
+			if err := dash.ListenAndServe(); err != nil {
+				logger.Error("dashboard stopped", "err", err)
+			}
+		}()
+	}
+
+	return serve(ctx, cfg, server, state, logger)
 }
 
 // serve runs the login/tunnel/serve loop, reconnecting with backoff.
-func serve(ctx context.Context, cfg *config.Config, server *socks.Server, logger *slog.Logger) error {
+func serve(ctx context.Context, cfg *config.Config, server *socks.Server, st *status.State, logger *slog.Logger) error {
 	var attempt int
 	for ctx.Err() == nil {
 		if attempt > 0 {
@@ -150,10 +175,12 @@ func serve(ctx context.Context, cfg *config.Config, server *socks.Server, logger
 		attempt++
 
 		started := time.Now()
-		err := session(ctx, cfg, server, logger)
+		err := session(ctx, cfg, server, st, logger)
 		if ctx.Err() != nil {
 			return nil
 		}
+		st.SetError(err, attempt-1)
+		st.SetPhase(status.PhaseReconnecting)
 		logger.Warn("tunnel closed", "err", err, "uptime", time.Since(started).Round(time.Second))
 		if time.Since(started) > stableSession {
 			attempt = 0
@@ -163,7 +190,8 @@ func serve(ctx context.Context, cfg *config.Config, server *socks.Server, logger
 }
 
 // session logs in, serves until the tunnel dies, then cleans up.
-func session(ctx context.Context, cfg *config.Config, server *socks.Server, logger *slog.Logger) error {
+func session(ctx context.Context, cfg *config.Config, server *socks.Server, st *status.State, logger *slog.Logger) error {
+	st.SetPhase(status.PhaseConnecting)
 	gateway := protocol.Gateway{
 		Host:    cfg.Gateway,
 		Address: cfg.GatewayAddress,
@@ -175,6 +203,7 @@ func session(ctx context.Context, cfg *config.Config, server *socks.Server, logg
 		Method:   cfg.AuthMethod,
 	})
 	if err != nil {
+		st.SetError(err, 0)
 		return err
 	}
 	logger.Info("authenticated")
@@ -182,6 +211,7 @@ func session(ctx context.Context, cfg *config.Config, server *socks.Server, logg
 	tun, err := tunnel.Start(ctx, sess)
 	if err != nil {
 		_ = sess.Conn.Close()
+		st.SetError(err, 0)
 		return err
 	}
 
@@ -205,25 +235,54 @@ func session(ctx context.Context, cfg *config.Config, server *socks.Server, logg
 	network := &netstack.Network{Stack: tun.Stack}
 	backend := &socks.Backend{Resolver: res, Dialer: network}
 
-	if relay, err := socks.NewUDPRelay(cfg.UDPListen, cfg.UDPAdvertise, res, network, logger, server.Counters); err != nil {
+	var (
+		relay     *socks.UDPRelay
+		stopRelay context.CancelFunc
+		relayAddr string
+	)
+	if r, err := socks.NewUDPRelay(cfg.UDPListen, cfg.UDPAdvertise, res, network, logger, server.Counters); err != nil {
 		logger.Warn("UDP relay disabled, serving TCP only", "err", err)
 	} else {
-		relayCtx, stopRelay := context.WithCancel(ctx)
-		defer stopRelay()
-		defer relay.Close()
-		defer relay.Wait()
+		var relayCtx context.Context
+		relayCtx, stopRelay = context.WithCancel(ctx)
+		relay = r
 		backend.UDP = relay
 		go relay.Run(relayCtx)
 		logger.Info("SOCKS5 ready",
 			"tcp", cfg.Listen, "udp", cfg.UDPListen, "advertise", cfg.UDPAdvertise)
+		relayAddr = relay.Advertised().String()
 	}
+
+	// Release resources in a fixed order: cancel, close the socket, then wait
+	// for the reader to exit. Registered before the backend so that
+	// ClearBackend (registered later, runs first) stops new work first.
+	defer func() {
+		if relay != nil {
+			stopRelay()
+			_ = relay.Close()
+			relay.Wait()
+		}
+	}()
 
 	server.SetBackend(backend)
 	defer server.ClearBackend()
+	st.SetReady(tun.LocalIP, dnsStrings(dnsServers), relayAddr)
 
 	err = <-tun.Done
+	// Report the outage immediately: teardown below can take a moment.
+	server.ClearBackend()
+	st.SetPhase(status.PhaseReconnecting)
 	tun.Logout()
 	return err
+}
+
+// dnsStrings renders the resolver list for the dashboard.
+func dnsStrings(addrs []netip.Addr) []string {
+	out := make([]string, 0, len(addrs))
+	for _, a := range addrs {
+		out = append(out, a.String())
+	}
+	return out
 }
 
 // usableDNS keeps the IPv4 entries of the gateway's DNS list.
