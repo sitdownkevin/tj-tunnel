@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-27
+
 ### Changed
 
 - Container images are published only to the GitHub Container Registry

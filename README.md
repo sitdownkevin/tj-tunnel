@@ -52,7 +52,7 @@ environment:
 镜像来自 GitHub Container Registry：`ghcr.io/sitdownkevin/tjsocks:latest`
 （公开包，拉取无需登录）。
 
-> 想锁定版本就改成 `ghcr.io/sitdownkevin/tjsocks:0.1.0`。
+> 想锁定版本就改成 `ghcr.io/sitdownkevin/tjsocks:0.1.1`。
 > 升级：`docker compose pull && docker compose up -d`。
 
 ### 2. 其他设备上使用
