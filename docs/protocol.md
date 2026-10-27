@@ -1,6 +1,6 @@
 # Protocol notes
 
-This document describes the wire format spoken by `tjsocks`. It was derived by
+This document describes the wire format spoken by `TJ Tunnel`. It was derived by
 observing the Open TJ client (<https://github.com/sitdownkevin/open_tj>, MIT).
 The gateway is a Sangfor-style SSL VPN appliance.
 
@@ -21,7 +21,7 @@ Every request carries `Cookie: ANStandalone=true; <session cookies>` and
 ```
 POST /prx/000/http/localhost/login      (form encoded)
      method=LDAP3 & uname=<user> & pwd=<password>
-     & pwd1= & pwd2= & deviceid= & device_name=tjsocks & hardwareid=
+     & pwd1= & pwd2= & deviceid= & device_name=TJ Tunnel & hardwareid=
      -> 302 Location: .../welcome   (success; cookies are the session)
      -> anything else               (authentication failure)
 ```
@@ -33,8 +33,8 @@ GET /prx/000/http/localhost/vpntunnel
     x-devtype: 3
     appid: SSPVPN
     clientid: <32 hex chars>
-    cpuid: tjsocks
-    hostname: tjsocks
+    cpuid: TJ Tunnel
+    hostname: TJ Tunnel
     PAYLOAD-IP-VERSION: 6
 
 <- HTTP/1.1 201 ...

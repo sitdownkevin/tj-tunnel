@@ -40,6 +40,9 @@ type Config struct {
 	WebListen string // empty disables it
 	WebUser   string // empty reuses the SOCKS credentials
 	WebPass   string
+
+	// Autostart connects immediately instead of waiting for the dashboard.
+	Autostart bool
 }
 
 // file mirrors Config for JSON (de)serialisation.
@@ -58,6 +61,7 @@ type file struct {
 	WebListen      string `json:"web_listen"`
 	WebUser        string `json:"web_user"`
 	WebPass        string `json:"web_pass"`
+	Autostart      *bool  `json:"autostart"`
 }
 
 func (c *Config) apply(f *file) {
@@ -80,16 +84,19 @@ func (c *Config) apply(f *file) {
 	set(&c.WebListen, f.WebListen)
 	set(&c.WebUser, f.WebUser)
 	set(&c.WebPass, f.WebPass)
+	if f.Autostart != nil {
+		c.Autostart = *f.Autostart
+	}
 }
 
 // Load resolves configuration with the following precedence (low to high):
-// defaults, ~/.tjsocks.json, -config file, environment variables, flags.
+// defaults, ~/.tj-tunnel.json, -config file, environment variables, flags.
 //
 // getenv is injected for testability; pass os.Getenv in production.
 func Load(args []string, getenv func(string) string) (*Config, error) {
 	cfg := &Config{Gateway: "vpn.tongji.cn", Listen: ":1080", LogLevel: "info"}
 
-	fs := flag.NewFlagSet("tjsocks", flag.ContinueOnError)
+	fs := flag.NewFlagSet("tj-tunnel", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	var (
 		configPath = fs.String("config", "", "path to a JSON configuration file")
@@ -103,16 +110,23 @@ func Load(args []string, getenv func(string) string) (*Config, error) {
 		logLevel   = fs.String("log-level", "", "log level: debug, info, warn or error")
 		webListen  = fs.String("web-listen", "", "web dashboard listen address, e.g. 0.0.0.0:8080 (empty disables it)")
 		webUser    = fs.String("web-user", "", "dashboard basic auth username (defaults to the SOCKS user)")
-		webPass    = fs.String("web-pass", "", "dashboard basic auth password (defaults to the SOCKS password)")
+		webPass    = fs.String("web-pass", "", "dashboard login password (defaults to the SOCKS password)")
+		autostart  = fs.Bool("autostart", false, "connect immediately instead of waiting for the dashboard")
 	)
 	if err := fs.Parse(args); err != nil {
 		return nil, err
 	}
+	autostartSet := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "autostart" {
+			autostartSet = true
+		}
+	})
 
-	// ~/.tjsocks.json, unless -config was given.
+	// ~/.tj-tunnel.json, unless -config was given.
 	if *configPath == "" {
 		if home, err := os.UserHomeDir(); err == nil {
-			if err := cfg.loadFile(filepath.Join(home, ".tjsocks.json"), false); err != nil {
+			if err := cfg.loadFile(filepath.Join(home, ".tj-tunnel.json"), false); err != nil {
 				return nil, err
 			}
 		}
@@ -141,6 +155,9 @@ func Load(args []string, getenv func(string) string) (*Config, error) {
 	env(&cfg.WebListen, "WEB_LISTEN")
 	env(&cfg.WebUser, "WEB_USER")
 	env(&cfg.WebPass, "WEB_PASS")
+	if v := getenv("AUTOSTART"); v != "" {
+		cfg.Autostart = v == "1" || v == "true" || v == "TRUE" || v == "True"
+	}
 
 	// Flags win over everything.
 	for _, f := range []struct {
@@ -164,6 +181,9 @@ func Load(args []string, getenv func(string) string) (*Config, error) {
 		}
 	}
 
+	if autostartSet {
+		cfg.Autostart = *autostart
+	}
 	cfg.derive()
 	return cfg, nil
 }
@@ -186,6 +206,11 @@ func (c *Config) loadFile(path string, required bool) error {
 
 // derive fills in values that depend on other settings.
 func (c *Config) derive() {
+	// Without a dashboard there is no way to trigger a connection, so
+	// autostart is implied.
+	if c.WebListen == "" {
+		c.Autostart = true
+	}
 	if c.AuthMethod == "" {
 		c.AuthMethod = "LDAP3"
 	}
@@ -202,10 +227,10 @@ func (c *Config) derive() {
 // Validate reports configuration problems.
 func (c *Config) Validate() error {
 	if c.Username == "" {
-		return errors.New("campus VPN username is required (TJ_USER, -u or ~/.tjsocks.json)")
+		return errors.New("campus VPN username is required (TJ_USER, -u or ~/.tj-tunnel.json)")
 	}
 	if c.Password == "" {
-		return errors.New("campus VPN password is required (TJ_PASSWORD, -p or ~/.tjsocks.json)")
+		return errors.New("campus VPN password is required (TJ_PASSWORD, -p or ~/.tj-tunnel.json)")
 	}
 	if c.Gateway == "" {
 		return errors.New("gateway host is required")
@@ -274,6 +299,6 @@ func (c *Config) Describe() string {
 	if c.WebListen != "" {
 		web = c.WebListen
 	}
-	return fmt.Sprintf("gateway=%s listen=%s udp=%s advertise=%s auth=%s web=%s user=%s",
-		gateway, c.Listen, c.UDPListen, c.UDPAdvertise, auth, web, c.Username)
+	return fmt.Sprintf("gateway=%s listen=%s udp=%s advertise=%s auth=%s web=%s autostart=%t user=%s",
+		gateway, c.Listen, c.UDPListen, c.UDPAdvertise, auth, web, c.Autostart, c.Username)
 }

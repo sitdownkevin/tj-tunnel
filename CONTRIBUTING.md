@@ -29,7 +29,7 @@ the README about the gVisor test-file package clash.
 ## Code layout
 
 ```
-cmd/tjsocks/       entry point: flags, reconnect loop, wiring
+cmd/TJ Tunnel/       entry point: flags, reconnect loop, wiring
 internal/config/   configuration precedence and validation
 internal/protocol/ gateway login, tunnel framing, control packets
 internal/tunnel/   gVisor netstack bridge and keepalives

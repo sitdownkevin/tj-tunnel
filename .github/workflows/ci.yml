@@ -25,6 +25,23 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Rebuild dashboard bundle
+        run: make web
+
+      - name: Verify committed bundle is up to date
+        run: |
+          if ! git diff --quiet -- internal/web/dist; then
+            echo "::error::internal/web/dist is stale. Run 'make web' and commit the result."
+            git --no-pager diff --stat -- internal/web/dist
+            exit 1
+          fi
+
       - name: Check formatting
         run: |
           unformatted="$(gofmt -l cmd internal)"

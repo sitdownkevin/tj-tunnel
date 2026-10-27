@@ -1,4 +1,4 @@
-// Command tjsocks exposes a Tongji campus VPN tunnel as a SOCKS5 proxy that
+// Command TJ Tunnel exposes a campus VPN tunnel as a SOCKS5 proxy that
 // supports both TCP (CONNECT) and UDP (UDP ASSOCIATE) traffic.
 package main
 
@@ -17,26 +17,21 @@ import (
 
 	"golang.org/x/term"
 
-	"github.com/sitdownkevin/tjsocks/internal/config"
-	"github.com/sitdownkevin/tjsocks/internal/netstack"
-	"github.com/sitdownkevin/tjsocks/internal/protocol"
-	"github.com/sitdownkevin/tjsocks/internal/resolver"
-	"github.com/sitdownkevin/tjsocks/internal/socks"
-	"github.com/sitdownkevin/tjsocks/internal/status"
-	"github.com/sitdownkevin/tjsocks/internal/tunnel"
-	"github.com/sitdownkevin/tjsocks/internal/version"
-	"github.com/sitdownkevin/tjsocks/internal/web"
-)
-
-const (
-	reconnectMaxDelay = 60 * time.Second
-	stableSession     = time.Minute
+	"github.com/sitdownkevin/tj-tunnel/internal/config"
+	"github.com/sitdownkevin/tj-tunnel/internal/netstack"
+	"github.com/sitdownkevin/tj-tunnel/internal/protocol"
+	"github.com/sitdownkevin/tj-tunnel/internal/resolver"
+	"github.com/sitdownkevin/tj-tunnel/internal/socks"
+	"github.com/sitdownkevin/tj-tunnel/internal/status"
+	"github.com/sitdownkevin/tj-tunnel/internal/tunnel"
+	"github.com/sitdownkevin/tj-tunnel/internal/version"
+	"github.com/sitdownkevin/tj-tunnel/internal/web"
 )
 
 func main() {
 	switch first := firstArg(); first {
 	case "-version", "--version":
-		fmt.Println("tjsocks " + version.String())
+		fmt.Println("TJ Tunnel " + version.String())
 		return
 	case "-healthcheck", "--healthcheck":
 		addr := "127.0.0.1:1080"
@@ -51,7 +46,7 @@ func main() {
 	case "-diagnose", "--diagnose":
 		cfg, err := config.Load(os.Args[2:], os.Getenv)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "tjsocks: "+err.Error())
+			fmt.Fprintln(os.Stderr, "TJ Tunnel: "+err.Error())
 			os.Exit(1)
 		}
 		if err := diagnose(cfg, os.Stdout); err != nil {
@@ -63,7 +58,7 @@ func main() {
 		return
 	}
 	if err := run(); err != nil {
-		fmt.Fprintln(os.Stderr, "tjsocks: "+err.Error())
+		fmt.Fprintln(os.Stderr, "TJ Tunnel: "+err.Error())
 		os.Exit(1)
 	}
 }
@@ -76,13 +71,13 @@ func firstArg() string {
 }
 
 func usage() {
-	fmt.Fprint(os.Stderr, `tjsocks - Tongji campus VPN to SOCKS5 gateway (TCP + UDP)
+	fmt.Fprint(os.Stderr, `tj-tunnel - campus VPN to SOCKS5 gateway (TCP + UDP)
 
 Usage:
-  tjsocks [flags]
-  tjsocks -healthcheck [host:port]   probe a running instance
-  tjsocks -diagnose                  test DNS/TCP/TLS/login against the gateway
-  tjsocks -version                   print build information
+  tj-tunnel [flags]
+  tj-tunnel -healthcheck [host:port]   probe a running instance
+  tj-tunnel -diagnose                  test DNS/TCP/TLS/login against the gateway
+  tj-tunnel -version                   print build information
 
 Flags:
   -u, -p                 campus VPN username / password
@@ -93,6 +88,7 @@ Flags:
   -config                JSON configuration file
   -log-level             debug|info|warn|error (default "info")
   -web-listen            开启 Web 状态面板，例如 0.0.0.0:8080（默认关闭）
+  -autostart             启动即连接；默认等待面板点击「连接」
   -web-user/-web-pass    面板登录认证（默认沿用 SOCKS_USER / SOCKS_PASS）
 
 Environment variables: TJ_USER, TJ_PASSWORD, TJ_AUTH_METHOD, TJ_GATEWAY,
@@ -137,16 +133,22 @@ func run() error {
 	go server.Serve(ctx)
 
 	state := status.New(version.Version, counters)
-	state.SetConfig(cfg.Gateway, cfg.AuthMethod, cfg.Listen, cfg.UDPListen, cfg.AuthEnabled())
+	state.SetConfig(cfg.Gateway, cfg.AuthMethod, cfg.Listen, cfg.UDPListen, cfg.SocksUser)
+
+	ctrl := newController(logger, state, cfg.Autostart, func(sessionCtx context.Context) error {
+		return session(sessionCtx, cfg, server, state, logger)
+	})
+	defer ctrl.Stop()
 
 	if cfg.WebListen != "" {
 		user, pass := cfg.DashboardAuth()
 		dash := web.New(web.Options{
-			Addr:     cfg.WebListen,
-			Username: user,
-			Password: pass,
-			Log:      logger,
-			State:    state,
+			Addr:       cfg.WebListen,
+			Username:   user,
+			Password:   pass,
+			Log:        logger,
+			State:      state,
+			Controller: ctrl,
 		})
 		defer dash.Shutdown()
 		go func() {
@@ -156,42 +158,21 @@ func run() error {
 		}()
 	}
 
-	return serve(ctx, cfg, server, state, logger)
-}
-
-// serve runs the login/tunnel/serve loop, reconnecting with backoff.
-func serve(ctx context.Context, cfg *config.Config, server *socks.Server, st *status.State, logger *slog.Logger) error {
-	var attempt int
-	for ctx.Err() == nil {
-		if attempt > 0 {
-			delay := min(reconnectMaxDelay, time.Duration(1)<<min(attempt, 6)*time.Second)
-			logger.Warn("reconnecting", "in", delay.String(), "attempt", attempt)
-			select {
-			case <-ctx.Done():
-				return nil
-			case <-time.After(delay):
-			}
+	if cfg.Autostart {
+		if err := ctrl.Start(); err != nil {
+			return err
 		}
-		attempt++
-
-		started := time.Now()
-		err := session(ctx, cfg, server, st, logger)
-		if ctx.Err() != nil {
-			return nil
-		}
-		st.SetError(err, attempt-1)
-		st.SetPhase(status.PhaseReconnecting)
-		logger.Warn("tunnel closed", "err", err, "uptime", time.Since(started).Round(time.Second))
-		if time.Since(started) > stableSession {
-			attempt = 0
-		}
+	} else {
+		logger.Info("waiting for a start request from the dashboard")
 	}
+
+	<-ctx.Done()
 	return nil
 }
 
+// serve runs the login/tunnel/serve loop, reconnecting with backoff.
 // session logs in, serves until the tunnel dies, then cleans up.
 func session(ctx context.Context, cfg *config.Config, server *socks.Server, st *status.State, logger *slog.Logger) error {
-	st.SetPhase(status.PhaseConnecting)
 	gateway := protocol.Gateway{
 		Host:    cfg.Gateway,
 		Address: cfg.GatewayAddress,
@@ -269,9 +250,8 @@ func session(ctx context.Context, cfg *config.Config, server *socks.Server, st *
 	st.SetReady(tun.LocalIP, dnsStrings(dnsServers), relayAddr)
 
 	err = <-tun.Done
-	// Report the outage immediately: teardown below can take a moment.
+	// Stop serving new work immediately; teardown below can take a moment.
 	server.ClearBackend()
-	st.SetPhase(status.PhaseReconnecting)
 	tun.Logout()
 	return err
 }

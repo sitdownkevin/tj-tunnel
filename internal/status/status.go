@@ -58,9 +58,14 @@ type Snapshot struct {
 	Attempts  int    `json:"attempts"`
 	LastError string `json:"last_error"`
 
+	// Control state.
+	Running       bool `json:"running"`        // tunnel loop is active
+	AutoReconnect bool `json:"auto_reconnect"` // retry after a disconnect
+
 	// Config flags, useful in the UI.
-	ProxyAuth bool `json:"proxy_auth"`
-	UDPLive   bool `json:"udp_live"`
+	ProxyAuth bool   `json:"proxy_auth"`
+	ProxyUser string `json:"proxy_user"`
+	UDPLive   bool   `json:"udp_live"`
 }
 
 // State is safe for concurrent use.
@@ -70,19 +75,22 @@ type State struct {
 	version string
 	started time.Time
 
-	phase      Phase
-	gateway    string
-	authMethod string
-	tunnelIP   string
-	dns        []string
-	listen     string
-	udpListen  string
-	udpRelay   string
-	sessionAt  time.Time
-	attempts   int
-	lastError  string
-	proxyAuth  bool
-	udpLive    bool
+	phase         Phase
+	gateway       string
+	authMethod    string
+	tunnelIP      string
+	dns           []string
+	listen        string
+	udpListen     string
+	udpRelay      string
+	sessionAt     time.Time
+	attempts      int
+	lastError     string
+	proxyAuth     bool
+	proxyUser     string
+	udpLive       bool
+	running       bool
+	autoReconnect bool
 
 	traffic Traffic
 
@@ -106,14 +114,38 @@ func New(version string, traffic Traffic) *State {
 }
 
 // SetConfig records the static configuration shown in the dashboard.
-func (s *State) SetConfig(gateway, authMethod, listen, udpListen string, proxyAuth bool) {
+func (s *State) SetConfig(gateway, authMethod, listen, udpListen, proxyUser string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.gateway = gateway
 	s.authMethod = authMethod
 	s.listen = listen
 	s.udpListen = udpListen
-	s.proxyAuth = proxyAuth
+	s.proxyUser = proxyUser
+	s.proxyAuth = proxyUser != ""
+}
+
+// SetRunning marks whether the tunnel loop is active.
+func (s *State) SetRunning(running bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.running = running
+	if !running {
+		// Forget the stale tunnel identity so the UI cannot show an address
+		// that no longer exists.
+		s.phase = PhaseStopped
+		s.tunnelIP = ""
+		s.sessionAt = time.Time{}
+		s.udpRelay = ""
+		s.udpLive = false
+	}
+}
+
+// SetAutoReconnect records whether reconnects are allowed.
+func (s *State) SetAutoReconnect(enabled bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.autoReconnect = enabled
 }
 
 // SetPhase moves the tunnel to another lifecycle stage.
@@ -200,7 +232,10 @@ func (s *State) Snapshot() Snapshot {
 		DownRate:          s.downRate,
 		Attempts:          s.attempts,
 		LastError:         s.lastError,
+		Running:           s.running,
+		AutoReconnect:     s.autoReconnect,
 		ProxyAuth:         s.proxyAuth,
+		ProxyUser:         s.proxyUser,
 		UDPLive:           s.udpLive,
 	}
 	if !s.sessionAt.IsZero() {

@@ -9,15 +9,15 @@ import (
 	"net"
 	"time"
 
-	"github.com/sitdownkevin/tjsocks/internal/config"
-	"github.com/sitdownkevin/tjsocks/internal/protocol"
+	"github.com/sitdownkevin/tj-tunnel/internal/config"
+	"github.com/sitdownkevin/tj-tunnel/internal/protocol"
 )
 
 // diagnose walks the connection path step by step and reports where it breaks.
 // It is meant to be run on the machine that hosts the proxy, inside the
-// container: `docker compose run --rm tjsocks -diagnose`.
+// container: `docker compose run --rm tj-tunnel -diagnose`.
 func diagnose(cfg *config.Config, out io.Writer) error {
-	fmt.Fprintf(out, "tjsocks 诊断\n")
+	fmt.Fprintf(out, "TJ Tunnel 诊断\n")
 	fmt.Fprintf(out, "  网关域名 : %s\n", cfg.Gateway)
 	if cfg.GatewayAddress != "" {
 		fmt.Fprintf(out, "  网关地址 : %s（覆盖 DNS）\n", cfg.GatewayAddress)

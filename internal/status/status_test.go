@@ -48,7 +48,7 @@ func TestInitialSnapshot(t *testing.T) {
 
 func TestReadyTransitionsAndReset(t *testing.T) {
 	s := New("dev", &fakeTraffic{})
-	s.SetConfig("vpn.tongji.cn", "LDAP3", ":1080", ":1080", true)
+	s.SetConfig("gateway.example", "LDAP3", ":1080", ":1080", "proxyuser")
 	s.SetError(errors.New("boom"), 3)
 	s.SetReady("10.1.2.3", []string{"202.120.190.208"}, "0.0.0.0:1080")
 

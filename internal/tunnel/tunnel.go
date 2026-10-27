@@ -23,7 +23,7 @@ import (
 	"gvisor.dev/gvisor/pkg/tcpip/transport/tcp"
 	"gvisor.dev/gvisor/pkg/tcpip/transport/udp"
 
-	"github.com/sitdownkevin/tjsocks/internal/protocol"
+	"github.com/sitdownkevin/tj-tunnel/internal/protocol"
 )
 
 // MTU matches the value the original client requests.

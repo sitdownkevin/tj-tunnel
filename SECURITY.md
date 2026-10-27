@@ -12,7 +12,7 @@ We aim to acknowledge reports within a few days.
 
 ## Deployment guidance
 
-`tjsocks` is a proxy to a campus network. Treat it like any other network
+`TJ Tunnel` is a proxy to a campus network. Treat it like any other network
 service exposed to the internet.
 
 1. **Always enable proxy authentication.** Set `SOCKS_USER` and `SOCKS_PASS`.

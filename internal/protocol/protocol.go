@@ -1,4 +1,4 @@
-// Package protocol implements the Tongji campus VPN (Sangfor SSL-VPN
+// Package protocol implements the campus VPN (Sangfor SSL-VPN
 // variant) login handshake and the IP-over-TLS tunnel framing.
 //
 // The wire format is documented in docs/protocol.md. Protocol details were
@@ -235,7 +235,7 @@ func (g Gateway) Login(ctx context.Context, cred Credentials) (*Session, error) 
 		"pwd1":        {""},
 		"pwd2":        {""},
 		"deviceid":    {""},
-		"device_name": {"tjsocks"},
+		"device_name": {"tj-tunnel"},
 		"hardwareid":  {""},
 	})
 	if err != nil {
@@ -280,8 +280,8 @@ func (g Gateway) Login(ctx context.Context, cred Credentials) (*Session, error) 
 		"x-devtype":          "3",
 		"appid":              "SSPVPN",
 		"clientid":           hex.EncodeToString(id[:]),
-		"cpuid":              "tjsocks",
-		"hostname":           "tjsocks",
+		"cpuid":              "tj-tunnel",
+		"hostname":           "tj-tunnel",
 		"PAYLOAD-IP-VERSION": "6",
 	} {
 		req.Header.Set(k, v)

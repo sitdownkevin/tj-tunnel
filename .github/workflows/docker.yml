@@ -59,8 +59,8 @@ jobs:
         with:
           images: ${{ env.IMAGE }}
           labels: |
-            org.opencontainers.image.title=tjsocks
-            org.opencontainers.image.description=Tongji campus VPN to SOCKS5 gateway (TCP + UDP)
+            org.opencontainers.image.title=TJ Tunnel
+            org.opencontainers.image.description=campus VPN to SOCKS5 gateway (TCP + UDP)
           tags: |
             type=ref,event=branch
             type=ref,event=pr

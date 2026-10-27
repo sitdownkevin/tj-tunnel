@@ -5,10 +5,11 @@
 .env.*
 *.md
 docs/
+web/node_modules/
 bin/
 dist/
-tjsocks
-tjsocks-*
+TJ Tunnel
+TJ Tunnel-*
 coverage.out
 Dockerfile
 docker-compose.yml

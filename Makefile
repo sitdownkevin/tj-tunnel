@@ -1,11 +1,11 @@
-# tjsocks — development tasks
+# TJ Tunnel — development tasks
 #
 # The module path is a placeholder: run `make rename` once after cloning into
 # your own GitHub account so imports match the repository URL.
 
-MODULE   ?= github.com/sitdownkevin/tjsocks
-BIN      ?= bin/tjsocks
-IMAGE    ?= tjsocks
+MODULE   ?= github.com/sitdownkevin/tj-tunnel
+BIN      ?= bin/tj-tunnel
+IMAGE    ?= tj-tunnel
 VERSION  ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT   ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
 DATE     ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -15,14 +15,20 @@ LDFLAGS   = -s -w \
             -X $(MODULE)/internal/version.Date=$(DATE)
 
 .DEFAULT_GOAL := help
-.PHONY: help build test test-race vet fmt fmt-check cover lint run docker docker-run clean tidy rename vendor
+.PHONY: help build web test test-race vet fmt fmt-check cover lint run docker docker-run clean tidy rename vendor
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | \
 	  awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
 
-build: ## Build the binary into bin/
-	go build -mod=vendor -trimpath -ldflags "$(LDFLAGS)" -o $(BIN) ./cmd/tjsocks
+web: ## Build the dashboard bundle (needs Node)
+	cd web && npm ci --no-audit --no-fund && npm run build
+
+web-dev: ## Run the dashboard dev server against a local backend
+	cd web && npm run dev
+
+build: ## Build the binary into bin/ (dashboard bundle must exist)
+	go build -mod=vendor -trimpath -ldflags "$(LDFLAGS)" -o $(BIN) ./cmd/tj-tunnel
 
 test: ## Run the unit tests
 	go test -mod=vendor ./...
@@ -48,7 +54,7 @@ lint: fmt-check vet ## Formatting + vet
 run: build ## Run locally (requires TJ_USER / TJ_PASSWORD)
 	./$(BIN)
 
-docker: ## Build the container image
+docker: ## Build the container image (dashboard compiled inside)
 	docker build --build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) \
 	  --build-arg DATE=$(DATE) -t $(IMAGE) .
 
@@ -63,10 +69,10 @@ tidy: ## Tidy modules and refresh vendor/
 vendor: ## Refresh the vendor directory
 	go mod vendor
 
-rename: ## Rewrite the module path (usage: make rename MODULE=github.com/you/tjsocks)
+rename: ## Rewrite the module path (usage: make rename MODULE=github.com/you/tj-tunnel)
 	@test -n "$(MODULE)" || { echo "MODULE is required"; exit 1; }
 	@echo "Renaming module to $(MODULE)"
-	@sed -i.bak "s|github.com/sitdownkevin/tjsocks|$(MODULE)|g" go.mod $$(find cmd internal -name '*.go') Dockerfile Makefile
+	@sed -i.bak "s|github.com/sitdownkevin/tj-tunnel|$(MODULE)|g" go.mod $$(find cmd internal -name '*.go') Dockerfile Makefile
 	@find . -name '*.bak' -delete
 	@go build -mod=vendor ./... && echo "OK"
 

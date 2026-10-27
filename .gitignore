@@ -3,10 +3,13 @@
 .env.*
 *.local.json
 
+# Dashboard dependencies (the built bundle IS committed on purpose)
+/web/node_modules/
+
 # Build output
 /bin/
-/tjsocks
-/tjsocks-*
+/TJ Tunnel
+/TJ Tunnel-*
 coverage.out
 /dist/
 
