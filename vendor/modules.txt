@@ -11,7 +11,7 @@ github.com/google/btree
 # golang.org/x/exp v0.0.0-20231110203233-9a3e6036ecaa
 ## explicit; go 1.20
 golang.org/x/exp/constraints
-# golang.org/x/net v0.61.0
+# golang.org/x/net v0.62.0
 ## explicit; go 1.26.0
 golang.org/x/net/dns/dnsmessage
 # golang.org/x/sys v0.49.0
