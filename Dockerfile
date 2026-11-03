@@ -3,7 +3,7 @@
 # ---- dashboard bundle -----------------------------------------------------
 # The React/MUI UI is compiled here and embedded into the Go binary, so the
 # runtime image never needs Node.
-FROM node:22-alpine AS web
+FROM node:26-alpine AS web
 
 WORKDIR /web
 
